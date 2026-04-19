@@ -1,6 +1,6 @@
 # grain
 
-`grain` is a Bun CLI for uploading galleries to Grain.social using ATProto OAuth.
+`grain` is a Bun CLI for uploading galleries to Grain.social.
 
 ## Quick start
 
@@ -51,11 +51,10 @@ Media formats:
 - Optional: `--exif exclude`
 - If EXIF parsing or image metadata normalization fails for a specific file, the CLI now auto-recovers by normalizing the image to a safe JPEG upload path instead of failing the whole gallery.
 
-## OAuth and security
+## Login and security
 
-- Uses ATProto OAuth (loopback callback on `127.0.0.1`), no app passwords.
-- On account switch, logging into a new DID revokes the previous active DID session (best-effort) and updates local active account.
-- Scopes are restricted to app-required collections and image blob upload.
+- Uses secure browser-based login, no app passwords.
+- On account switch, logging into a new account revokes the previous active session (best-effort) and updates local active account.
 - Local config/session files live in:
   - `$XDG_CONFIG_HOME/grain-cli/config.json`, or
   - `~/.config/grain-cli/config.json`

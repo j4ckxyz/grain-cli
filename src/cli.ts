@@ -11,10 +11,9 @@ import type { AltAiConfig, MediaInput } from "./types";
 function printHelp(): void {
   console.log(`grain
 
-ATProto CLI for posting Grain.social galleries.
+CLI for posting Grain.social galleries.
 
-This tool is built on the AT Protocol, not on Bluesky as a product.
-Login uses ATProto OAuth with a loopback callback on 127.0.0.1.
+Login uses secure browser-based sign-in.
 
 Defaults:
   - AI alt text: disabled (opt-in)
@@ -83,7 +82,7 @@ async function cmdLogin(argv: string[]): Promise<void> {
   if (hasOption(parsed.options, "pds") || hasOption(parsed.options, "app-password")) {
     throw new GrainError(
       "legacy_login_flags",
-      "`grain login` now uses ATProto OAuth and no longer accepts --pds or --app-password.",
+      "`grain login` now uses browser sign-in and no longer accepts --pds or --app-password.",
       "Run `grain login --handle your.handle` and approve in browser.",
     );
   }
@@ -94,10 +93,10 @@ async function cmdLogin(argv: string[]): Promise<void> {
   }
 
   if (!handle) {
-    throw new GrainError("missing_handle", "Handle is required for OAuth login.");
+    throw new GrainError("missing_handle", "Handle is required for login.");
   }
 
-  console.log("Starting secure ATProto OAuth login...");
+  console.log("Starting secure browser login...");
   const result = await loginWithOAuth(handle);
 
   console.log(`Logged in as ${result.handle}`);
@@ -196,7 +195,7 @@ async function cmdUploadGallery(argv: string[]): Promise<void> {
     exifMode,
   });
 
-  console.log(`Uploading ${mediaInputs.length} image(s) to Grain.social via ATProto...`);
+  console.log(`Uploading ${mediaInputs.length} image(s) to Grain.social...`);
   const result = await uploadGallery({
     agent,
     did,
@@ -253,7 +252,7 @@ async function cmdWizard(): Promise<void> {
     exifMode: wizard.exifMode,
   });
 
-  console.log(`Uploading ${wizard.mediaInputs.length} image(s) to Grain.social via ATProto...`);
+  console.log(`Uploading ${wizard.mediaInputs.length} image(s) to Grain.social...`);
   const result = await uploadGallery({
     agent,
     did,
