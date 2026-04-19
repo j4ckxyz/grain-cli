@@ -129,6 +129,68 @@ function buildLoopbackClientId(redirectUri: string, scope: string): string {
   return `${LOOPBACK_ORIGIN}?${params.toString()}`;
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/\"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function buildOAuthCallbackHtml(handle: string, ok: boolean): string {
+  const safeHandle = escapeHtml(handle);
+  const heading = ok
+    ? `🎉 You have authenticated as ${safeHandle}.`
+    : `Authentication did not complete for ${safeHandle}.`;
+  const message = ok
+    ? "You can close this page now and return to the terminal."
+    : "You can close this page and return to the terminal for details.";
+
+  return `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>grain login</title>
+    <style>
+      :root { color-scheme: light dark; }
+      body {
+        margin: 0;
+        min-height: 100vh;
+        display: grid;
+        place-items: center;
+        font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Helvetica, Arial, sans-serif;
+        background: radial-gradient(circle at top, rgba(37, 99, 235, 0.1), transparent 50%);
+      }
+      main {
+        width: min(640px, calc(100vw - 3rem));
+        padding: 2rem;
+        border: 1px solid rgba(120, 120, 120, 0.35);
+        border-radius: 16px;
+        background: rgba(255, 255, 255, 0.7);
+      }
+      h1 {
+        margin: 0 0 0.75rem;
+        font-size: 1.35rem;
+        line-height: 1.35;
+      }
+      p {
+        margin: 0;
+        font-size: 1rem;
+        line-height: 1.5;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>${heading}</h1>
+      <p>${message}</p>
+    </main>
+  </body>
+</html>`;
+}
+
 function createClient(clientId: string, redirectUri: string, scope: string): NodeOAuthClient {
   const stores = makeStores();
 
@@ -149,7 +211,7 @@ function createClient(clientId: string, redirectUri: string, scope: string): Nod
   });
 }
 
-async function waitForOAuthCallback(redirectPort: number, timeoutMs = 180000): Promise<URLSearchParams> {
+async function waitForOAuthCallback(handle: string, redirectPort: number, timeoutMs = 180000): Promise<URLSearchParams> {
   let resolveResult!: (params: URLSearchParams) => void;
   let rejectResult!: (error: Error) => void;
 
@@ -172,8 +234,16 @@ async function waitForOAuthCallback(redirectPort: number, timeoutMs = 180000): P
           return new Response("Not found", { status: 404 });
         }
 
+        const hasError = url.searchParams.has("error");
+
         resolveResult(url.searchParams);
-        return new Response("Login complete. Return to terminal.", { status: 200 });
+        return new Response(buildOAuthCallbackHtml(handle, !hasError), {
+          status: hasError ? 400 : 200,
+          headers: {
+            "content-type": "text/html; charset=utf-8",
+            "cache-control": "no-store",
+          },
+        });
       } catch (error) {
         rejectResult(new GrainError("oauth_callback_error", error instanceof Error ? error.message : String(error)));
         return new Response("OAuth callback failed.", { status: 500 });
@@ -251,7 +321,7 @@ export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> 
     state: appState,
   });
 
-  const callbackPromise = waitForOAuthCallback(redirectPort);
+  const callbackPromise = waitForOAuthCallback(handle, redirectPort);
 
   console.log("Open the following URL to continue login:");
   console.log(authorizeUrl.toString());
