@@ -565,6 +565,7 @@ async function runGuidedPost(initial?: UploadDraft): Promise<void> {
 
 async function cmdStart(): Promise<void> {
   const config = await loadConfig();
+  const safeConfig = config ?? {};
   const defaultAltAi = config?.altAi
     ? {
         endpoint: config.altAi.endpoint,
@@ -579,6 +580,7 @@ async function cmdStart(): Promise<void> {
     styles: config?.styles ?? [],
     draftCount: drafts.length,
     defaultAltAi,
+    startDefaults: config?.startDefaults,
   });
 
   if (startFlow.action === "save_draft") {
@@ -605,6 +607,11 @@ async function cmdStart(): Promise<void> {
     );
     console.log(`Saved style: ${startFlow.saveAsStyleName}`);
   }
+
+  await saveConfig({
+    ...safeConfig,
+    startDefaults: startFlow.startDefaults,
+  });
 
   let upload = startFlow.upload;
   while (true) {

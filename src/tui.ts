@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GrainError } from "./errors";
 import { parseWizardMediaEntry } from "./media-input";
-import type { AltAiConfig, MediaInput, PostingStyle } from "./types";
+import type { AltAiConfig, MediaInput, PostingStyle, StartDefaults } from "./types";
 
 type Prompt = {
   askText(message: string, options?: { allowEmpty?: boolean; defaultValue?: string }): Promise<string>;
@@ -169,6 +169,7 @@ type StartFlowResult =
       upload: UploadWizardResult;
       saveAsStyleName?: string;
       queueIfOffline: boolean;
+      startDefaults: StartDefaults;
     }
   | {
       action: "save_draft";
@@ -332,63 +333,237 @@ function styleToWizardBase(style: PostingStyle): Partial<UploadWizardResult> {
   };
 }
 
+function hasLocationFields(upload: Partial<UploadWizardResult>): boolean {
+  return Boolean(
+    upload.locationName ||
+      upload.locationValue ||
+      upload.placeName ||
+      upload.street ||
+      upload.locality ||
+      upload.region ||
+      upload.postalCode ||
+      upload.country,
+  );
+}
+
+function mediaLabel(media: MediaInput, index: number): string {
+  const short = media.value.length > 60 ? `${media.value.slice(0, 57)}...` : media.value;
+  return `${index + 1}) ${media.kind === "path" ? "@" : ""}${short}`;
+}
+
+function normalizeManualAlt(value: string): string {
+  return normalizeAscii(value);
+}
+
+function reorderByIndex<T>(items: T[], order: number[]): T[] {
+  return order.map((index) => items[index]);
+}
+
+function parseReorderInput(raw: string, size: number): number[] {
+  const parts = raw
+    .split(",")
+    .map((part) => Number.parseInt(part.trim(), 10) - 1)
+    .filter((value) => Number.isFinite(value));
+
+  if (parts.length !== size) {
+    throw new GrainError("invalid_reorder", `Please provide exactly ${size} numbers.`);
+  }
+
+  const seen = new Set<number>();
+  for (const index of parts) {
+    if (index < 0 || index >= size || seen.has(index)) {
+      throw new GrainError("invalid_reorder", "Photo order must include each photo exactly once.");
+    }
+    seen.add(index);
+  }
+
+  return parts;
+}
+
 export async function runStartFlow(input: {
   styles: PostingStyle[];
   draftCount: number;
   defaultAltAi?: AltAiConfig;
+  startDefaults?: Partial<StartDefaults>;
 }): Promise<StartFlowResult> {
   const prompt = buildPrompt();
   console.log("grain start - guided posting");
   await animateLine("Loading camera bag", FOCUS_FRAMES, 65);
 
-  const modeChoices = ["Create and publish now (recommended)", "Save an unfinished draft"];
   if (input.draftCount > 0) {
-    modeChoices.push(`Resume saved draft (use grain drafts, ${input.draftCount} available)`);
+    console.log(`Tip: you have ${input.draftCount} saved draft(s). Resume anytime with: grain drafts`);
   }
 
-  const mode = await prompt.askChoice("What do you want to do?", modeChoices, 0);
-  if (mode === 1) {
-    const upload = await runUploadWizard();
-    return { action: "save_draft", upload };
-  }
+  const title = await prompt.askText("Gallery title");
+  const descriptionRaw = await prompt.askText("Description (optional)", {
+    allowEmpty: true,
+  });
+  let description = descriptionRaw || undefined;
 
-  if (mode === 2) {
-    throw new GrainError("resume_draft_from_start", "Use `grain drafts` to pick and resume a saved draft.");
-  }
-
-  let chosenStyle: PostingStyle | undefined;
-  if (input.styles.length > 0) {
-    const useStyle = await prompt.askYesNo("Use a saved posting style?", true);
-    if (useStyle) {
-      const index = await prompt.askChoice(
-        "Pick a style",
-        input.styles.map((style) => style.name),
-        0,
-      );
-      chosenStyle = input.styles[index];
+  const mediaInputs: MediaInput[] = [];
+  while (true) {
+    const value = await prompt.askText("Add image (@path or https://url). Empty to continue", { allowEmpty: true });
+    if (!value) {
+      break;
+    }
+    try {
+      mediaInputs.push(parseWizardMediaEntry(value));
+      await animateLine(`Framed image ${mediaInputs.length}`, SHUTTER_FRAMES, 60);
+    } catch (error) {
+      console.log(error instanceof Error ? error.message : String(error));
     }
   }
 
-  const upload = await runUploadWizard({
-    ...(chosenStyle ? styleToWizardBase(chosenStyle) : {}),
-    altAi: input.defaultAltAi,
-  });
+  if (mediaInputs.length === 0) {
+    throw new GrainError("missing_media", "At least one image is required.");
+  }
 
-  const scheduleInput = await prompt.askText("Schedule time (optional, ISO format)", {
-    allowEmpty: true,
-    defaultValue: upload.scheduleAt,
-  });
-  upload.scheduleAt = parseScheduleInput(scheduleInput);
+  const altTexts: string[] = [];
+  let altAi: AltAiConfig | undefined;
 
-  const queueIfOffline = await prompt.askYesNo("Queue and retry automatically if publish fails?", true);
-  const saveAsStyle = await prompt.askYesNo("Save this setup as a reusable style?", false);
-  const saveAsStyleName = saveAsStyle ? await prompt.askText("Style name") : undefined;
+  if (input.defaultAltAi) {
+    const useAltAi = await prompt.askYesNo("Use saved AI alt text settings?", true);
+    if (useAltAi) {
+      altAi = input.defaultAltAi;
+    }
+  }
+
+  if (!altAi) {
+    const addManualAlt = await prompt.askYesNo("Add manual alt text now?", true);
+    if (addManualAlt) {
+      for (let i = 0; i < mediaInputs.length; i += 1) {
+        const alt = await prompt.askText(`Alt text for image ${i + 1}/${mediaInputs.length} (${mediaInputs[i].value})`, {
+          allowEmpty: true,
+        });
+        altTexts.push(normalizeManualAlt(alt));
+      }
+    }
+  }
+
+  const defaults: StartDefaults = {
+    exifMode: input.startDefaults?.exifMode === "exclude" ? "exclude" : "include",
+    queueIfOffline: input.startDefaults?.queueIfOffline ?? true,
+  };
+
+  let queueIfOffline = defaults.queueIfOffline;
+  let exifMode: "include" | "exclude" = defaults.exifMode;
+  let scheduleAt: string | undefined;
+  let cw: string | undefined;
+  let locationName: string | undefined;
+  let locationValue: string | undefined;
+  let placeName: string | undefined;
+  let street: string | undefined;
+  let locality: string | undefined;
+  let region: string | undefined;
+  let postalCode: string | undefined;
+  let country: string | undefined;
+  let saveAsStyleName: string | undefined;
+
+  const useAdvanced = await prompt.askYesNo("Open advanced options? (schedule, retry, EXIF, location, reorder)", false);
+  if (useAdvanced) {
+    let styleBase: Partial<UploadWizardResult> = {};
+    if (input.styles.length > 0) {
+      const useStyle = await prompt.askYesNo("Apply a saved style for optional defaults?", false);
+      if (useStyle) {
+        const index = await prompt.askChoice(
+          "Pick a style",
+          input.styles.map((style) => style.name),
+          0,
+        );
+        styleBase = styleToWizardBase(input.styles[index]);
+        if (!description && styleBase.description) {
+          description = styleBase.description;
+        }
+      }
+    }
+
+    const scheduleInput = await prompt.askText("Schedule time (optional, ISO format)", {
+      allowEmpty: true,
+    });
+    scheduleAt = parseScheduleInput(scheduleInput);
+
+    queueIfOffline = await prompt.askYesNo("Queue and retry automatically if publish fails?", queueIfOffline);
+    const includeExif = await prompt.askYesNo("Include EXIF metadata?", (styleBase.exifMode ?? exifMode) === "include");
+    exifMode = includeExif ? "include" : "exclude";
+
+    const addLocation = await prompt.askYesNo("Add location details?", hasLocationFields(styleBase));
+    if (addLocation) {
+      locationName = await prompt.askText("Location name (display)", { defaultValue: styleBase.locationName });
+      locationValue = await prompt.askText("Location value (H3 index)", { defaultValue: styleBase.locationValue });
+      placeName =
+        (await prompt.askText("Address place name", { allowEmpty: true, defaultValue: styleBase.placeName })) || undefined;
+      street = (await prompt.askText("Address street", { allowEmpty: true, defaultValue: styleBase.street })) || undefined;
+      locality = (await prompt.askText("Address locality", { allowEmpty: true, defaultValue: styleBase.locality })) || undefined;
+      region = (await prompt.askText("Address region", { allowEmpty: true, defaultValue: styleBase.region })) || undefined;
+      postalCode =
+        (await prompt.askText("Address postal code", { allowEmpty: true, defaultValue: styleBase.postalCode })) || undefined;
+      country = (await prompt.askText("Address country code", { allowEmpty: true, defaultValue: styleBase.country })) || undefined;
+    }
+
+    const addContentWarnings = await prompt.askYesNo("Add content warnings?", Boolean(styleBase.cw));
+    if (addContentWarnings) {
+      cw =
+        (await prompt.askText("Content warnings (comma-separated labels)", {
+          allowEmpty: true,
+          defaultValue: styleBase.cw,
+        })) || undefined;
+    }
+
+    const reorder = await prompt.askYesNo("Reorder photos before publish?", false);
+    if (reorder && mediaInputs.length > 1) {
+      while (true) {
+        console.log("Current photo order:");
+        for (let i = 0; i < mediaInputs.length; i += 1) {
+          console.log(`  ${mediaLabel(mediaInputs[i], i)}`);
+        }
+        const rawOrder = await prompt.askText(`New order as comma numbers (example: 2,1${mediaInputs.length > 2 ? ",3" : ""})`);
+        try {
+          const order = parseReorderInput(rawOrder, mediaInputs.length);
+          const nextMedia = reorderByIndex(mediaInputs, order);
+          mediaInputs.splice(0, mediaInputs.length, ...nextMedia);
+          if (altTexts.length > 0) {
+            const nextAlts = reorderByIndex(altTexts, order);
+            altTexts.splice(0, altTexts.length, ...nextAlts);
+          }
+          break;
+        } catch (error) {
+          console.log(error instanceof Error ? error.message : String(error));
+        }
+      }
+    }
+
+    const saveAsStyle = await prompt.askYesNo("Save these optional settings as a reusable style?", false);
+    saveAsStyleName = saveAsStyle ? await prompt.askText("Style name") : undefined;
+  }
+
+  const upload: UploadWizardResult = {
+    title,
+    description,
+    locationName,
+    locationValue,
+    placeName,
+    street,
+    locality,
+    region,
+    postalCode,
+    country,
+    cw,
+    exifMode,
+    mediaInputs,
+    altTexts,
+    altAi,
+    scheduleAt,
+  };
 
   return {
     action: "post",
     upload,
     saveAsStyleName,
     queueIfOffline,
+    startDefaults: {
+      exifMode,
+      queueIfOffline,
+    },
   };
 }
 

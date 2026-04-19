@@ -38,6 +38,14 @@ export async function loadConfig(): Promise<AppConfig | null> {
       throw new Error(`Invalid alt AI config format at ${path}`);
     }
   }
+  if (parsed.startDefaults) {
+    if (
+      (parsed.startDefaults.exifMode !== "include" && parsed.startDefaults.exifMode !== "exclude") ||
+      typeof parsed.startDefaults.queueIfOffline !== "boolean"
+    ) {
+      throw new Error(`Invalid start defaults config format at ${path}`);
+    }
+  }
   return parsed;
 }
 

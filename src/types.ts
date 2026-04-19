@@ -36,6 +36,12 @@ export type AppConfig = {
   oauth?: OAuthConfig;
   styles?: PostingStyle[];
   altAi?: AltAiAuthConfig;
+  startDefaults?: StartDefaults;
+};
+
+export type StartDefaults = {
+  exifMode: "include" | "exclude";
+  queueIfOffline: boolean;
 };
 
 export type RichTextFacet = {
