@@ -64,7 +64,10 @@ function buildPrompt(): Prompt {
       const value = await new Promise<string>((resolve) => {
         stdin.resume();
         stdin.setEncoding("utf8");
-        stdin.once("data", (chunk) => resolve(String(chunk).trim()));
+        stdin.once("data", (chunk) => {
+          stdin.pause();
+          resolve(String(chunk).trim());
+        });
       });
 
       const next = value || options.defaultValue || "";
@@ -139,9 +142,13 @@ export async function openInNativeViewer(bytes: Uint8Array, mimeType: string): P
     // ignore viewer errors
   }
 
-  setTimeout(() => {
+  const cleanupTimer = setTimeout(() => {
     void rm(dir, { recursive: true, force: true });
   }, 60_000);
+  if (typeof cleanupTimer === "object" && cleanupTimer !== null && "unref" in cleanupTimer) {
+    const maybeTimer = cleanupTimer as { unref?: () => void };
+    maybeTimer.unref?.();
+  }
 }
 
 export type UploadWizardResult = {

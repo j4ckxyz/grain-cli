@@ -98,7 +98,10 @@ async function promptLine(message: string, allowEmpty = false): Promise<string> 
     const value = await new Promise<string>((resolve) => {
       process.stdin.resume();
       process.stdin.setEncoding("utf8");
-      process.stdin.once("data", (chunk) => resolve(String(chunk).trim()));
+      process.stdin.once("data", (chunk) => {
+        process.stdin.pause();
+        resolve(String(chunk).trim());
+      });
     });
 
     if (value || allowEmpty) {
@@ -866,4 +869,6 @@ run().catch((error) => {
     console.error(`Hint: ${issue.hint}`);
   }
   process.exitCode = 1;
+}).finally(() => {
+  process.stdin.pause();
 });
