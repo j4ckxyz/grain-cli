@@ -108,7 +108,12 @@ export function mapExifToGrainFields(raw: RawExif): GrainExifFields | undefined 
 }
 
 export async function extractGrainExifFields(bytes: Uint8Array): Promise<GrainExifFields | undefined> {
-  const raw = await exifr.parse(Buffer.from(bytes));
+  let raw: unknown;
+  try {
+    raw = await exifr.parse(Buffer.from(bytes));
+  } catch {
+    return undefined;
+  }
 
   if (!raw || typeof raw !== "object") {
     return undefined;

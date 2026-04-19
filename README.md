@@ -1,153 +1,72 @@
 # grain
 
-`grain` is a Bun-based CLI for uploading galleries to Grain.social over the AT Protocol.
+`grain` is a Bun CLI for uploading galleries to Grain.social using ATProto OAuth.
 
-It is **not** a Bluesky product client. It uses ATProto primitives and OAuth.
-
-## Security model
-
-- Login uses **ATProto OAuth** with a localhost callback (`127.0.0.1`), not app passwords.
-- OAuth scope is restricted to the app requirements:
-  - `atproto`
-  - `blob:image/*`
-  - `repo:social.grain.actor.profile`
-  - `repo:social.grain.comment`
-  - `repo:social.grain.favorite`
-  - `repo:social.grain.gallery`
-  - `repo:social.grain.gallery.item`
-  - `repo:social.grain.graph.follow`
-  - `repo:social.grain.photo`
-  - `repo:social.grain.photo.exif`
-  - `repo:social.grain.story`
-- OAuth state/session files are stored under `~/.config/grain-cli` (or `$XDG_CONFIG_HOME/grain-cli`) with `0600` permissions.
-
-## Defaults
-
-- AI alt text: **off** (opt-in)
-- EXIF metadata: **included**
-- Location metadata: optional, but recommended
-
-## Install
-
-Prerequisites:
-
-- macOS or Linux
-- Bun installed: https://bun.sh/docs/installation
-
-### Quick install (curl | bash)
+## Quick start
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/j4ckxyz/grain-cli/main/scripts/install.sh | bash
-```
-
-Then refresh your shell:
-
-```bash
 exec "$SHELL" -l
+grain login --handle your.handle
+grain
 ```
 
-### Local dev install
-
-```bash
-bun install
-bun install -g .
-```
-
-## Commands
+## Core commands
 
 ```bash
 grain help
-```
-
-Login:
-
-```bash
 grain login --handle j4ck.xyz
-```
-
-Show active account:
-
-```bash
 grain whoami
-```
-
-Logout:
-
-```bash
 grain logout
 ```
 
-Upload gallery (non-interactive):
+Run `grain` with no subcommand to open the interactive upload wizard.
+
+## Upload basics
 
 ```bash
 grain upload-gallery \
   --title "Morning walk" \
   --description "Hi @alice.com #nature https://example.com" \
-  --location-name "St Ouen" \
-  --location-value "8a1862806aa7fff" \
-  --country JE \
-  --cw nudity \
-  --exif include \
   --alt "Trees by the coast" \
   --alt "Clouds over the beach" \
-  ./img1.jpg ./img2.jpg
+  --image @img1.jpg \
+  --image-url https://example.com/img2.jpg
 ```
 
-Upload with image URLs:
+Media formats:
 
-```bash
-grain upload-gallery \
-  --title "City textures" \
-  --description "Street art and signs #urban" \
-  --image-url https://example.com/photo1.jpg \
-  --image-url https://example.com/photo2.jpg
-```
+- Local file: prefix with `@` (for example `@photo.jpg`, `@./images/a.jpg`)
+- Remote URL: full `http://` or `https://` URL
 
-AI alt text (OpenAI-compatible API, optional):
+## Alt text
 
-```bash
-grain upload-gallery \
-  --title "Food market" \
-  --description "Saturday market #food" \
-  --alt-ai-endpoint https://api.openai.com/v1 \
-  --alt-ai-api-key $OPENAI_API_KEY \
-  --alt-ai-model gpt-4.1-mini \
-  --image-url https://example.com/market.jpg
-```
+- Manual alt text: repeat `--alt` in the same order as images.
+- Optional AI alt text: provide endpoint/key/model flags.
+- In wizard mode, the tool opens each image in your native viewer when manual alt input is needed.
 
-AI config can also be provided via env vars:
+## EXIF handling
 
-- `GRAIN_ALT_AI_ENDPOINT`
-- `GRAIN_ALT_AI_API_KEY`
-- `GRAIN_ALT_AI_MODEL`
+- Default: `--exif include`
+- Optional: `--exif exclude`
+- If EXIF parsing or image metadata normalization fails for a specific file, the CLI now auto-recovers by normalizing the image to a safe JPEG upload path instead of failing the whole gallery.
 
-If `--alt` is set for an image, manual alt wins and AI is skipped for that image.
+## OAuth and security
 
-## Interactive mode
+- Uses ATProto OAuth (loopback callback on `127.0.0.1`), no app passwords.
+- On account switch, logging into a new DID revokes the previous active DID session (best-effort) and updates local active account.
+- Scopes are restricted to app-required collections and image blob upload.
+- Local config/session files live in:
+  - `$XDG_CONFIG_HOME/grain-cli/config.json`, or
+  - `~/.config/grain-cli/config.json`
 
-Run:
+Files are written with user-only permissions (`0600`).
 
-```bash
-grain
-```
+## Notes on local dev install
 
-Media entry format in wizard:
+Use the installer for a stable global command path. Repeated `bun link` / `bun install -g .` cycles can leave duplicate entries in Bun global metadata on some setups.
 
-- local file: `@photo.jpg` or `@./images/a.jpg`
-- remote URL: `https://...`
-
-If AI alt is enabled in wizard, manual prompts are skipped unless generation fails.
-
-## Error handling
-
-Errors are printed in a structured form:
-
-- `Error [code]: message`
-- optional actionable hint
-
-Examples include missing gallery title, invalid media URL, AI alt failures, and OAuth/session issues.
-
-## Testing
+## Tests
 
 ```bash
 bun test

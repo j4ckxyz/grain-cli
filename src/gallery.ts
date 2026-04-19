@@ -1,6 +1,7 @@
 import { resolve } from "node:path";
 import { Agent } from "@atproto/api";
 import { imageSize } from "image-size";
+import sharp from "sharp";
 import { buildFacets } from "./richtext";
 import { buildSelfLabels, nowIso } from "./atproto";
 import { generateAltTextFromImage } from "./alt-ai";
@@ -9,6 +10,8 @@ import { extractGrainExifFields, type GrainExifFields } from "./exif";
 import { stripImageMetadata } from "./image-metadata";
 import { detectImageMime, detectImageMimeFromUrl } from "./mime";
 import type { AltAiConfig, MediaInput } from "./types";
+
+type ByteArray = Uint8Array<ArrayBufferLike>;
 
 export type GalleryAddress = {
   name?: string;
@@ -38,7 +41,7 @@ export type UploadGalleryOptions = {
     sourceKind: MediaInput["kind"];
     sourceValue: string;
     sourceLabel: string;
-    bytes: Uint8Array;
+    bytes: ByteArray;
     mimeType: string;
     reason: "missing" | "ai_failed";
     errorMessage?: string;
@@ -135,17 +138,54 @@ type PreparedMedia = {
   sourceKind: MediaInput["kind"];
   sourceValue: string;
   sourceLabel: string;
-  originalBytes: Uint8Array;
+  originalBytes: ByteArray;
   mimeType: string;
 };
 
 type PreparedUpload = PreparedMedia & {
-  bytes: Uint8Array;
+  bytes: ByteArray;
   width: number;
   height: number;
   alt?: string;
   exif?: GrainExifFields;
 };
+
+async function repairImageToJpeg(bytes: ByteArray): Promise<ByteArray | undefined> {
+  try {
+    const repaired = await sharp(Buffer.from(bytes), { failOn: "none" }).rotate().jpeg({ quality: 95 }).toBuffer();
+    return new Uint8Array(repaired.buffer, repaired.byteOffset, repaired.byteLength);
+  } catch {
+    return undefined;
+  }
+}
+
+async function readImageDimensions(bytes: ByteArray, sourceLabel: string): Promise<{ width: number; height: number }> {
+  try {
+    const dimensions = imageSize(Buffer.from(bytes));
+    if (dimensions.width && dimensions.height) {
+      return {
+        width: dimensions.width,
+        height: dimensions.height,
+      };
+    }
+  } catch {
+    // Fall through to sharp metadata check.
+  }
+
+  try {
+    const metadata = await sharp(Buffer.from(bytes), { failOn: "none" }).metadata();
+    if (metadata.width && metadata.height) {
+      return {
+        width: metadata.width,
+        height: metadata.height,
+      };
+    }
+  } catch {
+    // handled by final error
+  }
+
+  throw new GrainError("image_dimensions_failed", `Could not read image dimensions for ${sourceLabel}`);
+}
 
 async function loadMediaInput(media: MediaInput): Promise<PreparedMedia> {
   if (media.kind === "path") {
@@ -155,16 +195,24 @@ async function loadMediaInput(media: MediaInput): Promise<PreparedMedia> {
       throw new GrainError("image_not_found", `Image not found: ${imagePath}`);
     }
 
-    const mimeType = detectImageMime(imagePath, file.type);
+    let mimeType = detectImageMime(imagePath, file.type);
+    let originalBytes: ByteArray = new Uint8Array(await file.arrayBuffer());
     if (!mimeType.startsWith("image/")) {
-      throw new GrainError("unsupported_media_type", `Unsupported media type for ${imagePath}: ${mimeType}`);
+      const repaired = await repairImageToJpeg(originalBytes);
+      if (!repaired) {
+        throw new GrainError("unsupported_media_type", `Unsupported media type for ${imagePath}: ${mimeType}`);
+      }
+
+      console.log(`Repaired unrecognized image for ${imagePath}; converted to JPEG.`);
+      originalBytes = repaired;
+      mimeType = "image/jpeg";
     }
 
     return {
       sourceKind: "path",
       sourceValue: media.value,
       sourceLabel: imagePath,
-      originalBytes: new Uint8Array(await file.arrayBuffer()),
+      originalBytes,
       mimeType,
     };
   }
@@ -178,16 +226,24 @@ async function loadMediaInput(media: MediaInput): Promise<PreparedMedia> {
     );
   }
 
-  const mimeType = detectImageMimeFromUrl(media.value, response.headers.get("content-type"));
+  let mimeType = detectImageMimeFromUrl(media.value, response.headers.get("content-type"));
+  let originalBytes: ByteArray = new Uint8Array(await response.arrayBuffer());
   if (!mimeType.startsWith("image/")) {
-    throw new GrainError("download_not_image", `Downloaded URL is not an image: ${media.value} (${mimeType})`);
+    const repaired = await repairImageToJpeg(originalBytes);
+    if (!repaired) {
+      throw new GrainError("download_not_image", `Downloaded URL is not an image: ${media.value} (${mimeType})`);
+    }
+
+    console.log(`Repaired unrecognized image from URL; converted to JPEG: ${media.value}`);
+    originalBytes = repaired;
+    mimeType = "image/jpeg";
   }
 
   return {
     sourceKind: "url",
     sourceValue: media.value,
     sourceLabel: media.value,
-    originalBytes: new Uint8Array(await response.arrayBuffer()),
+    originalBytes,
     mimeType,
   };
 }
@@ -208,22 +264,44 @@ export async function uploadGallery(options: UploadGalleryOptions): Promise<Uplo
     const media = await loadMediaInput(options.mediaInputs[index]);
 
     let uploadBytes = media.originalBytes;
+    let mimeType = media.mimeType;
     let exif: GrainExifFields | undefined;
     if (exifMode === "include") {
       exif = await extractGrainExifFields(media.originalBytes);
     } else {
-      uploadBytes = await stripImageMetadata(media.originalBytes, media.mimeType);
+      try {
+        uploadBytes = await stripImageMetadata(media.originalBytes, media.mimeType);
+      } catch {
+        const repaired = await repairImageToJpeg(media.originalBytes);
+        if (!repaired) {
+          throw new GrainError("unsupported_media_type", `Unable to normalize image for upload: ${media.sourceLabel}`);
+        }
+
+        console.log(`Repaired unsupported image variant for ${media.sourceLabel}; converted to JPEG.`);
+        uploadBytes = repaired;
+        mimeType = "image/jpeg";
+      }
     }
 
-    const dimensions = imageSize(Buffer.from(uploadBytes));
-    if (!dimensions.width || !dimensions.height) {
-      throw new GrainError("image_dimensions_failed", `Could not read image dimensions for ${media.sourceLabel}`);
+    let dimensions: { width: number; height: number };
+    try {
+      dimensions = await readImageDimensions(uploadBytes, media.sourceLabel);
+    } catch {
+      const repaired = await repairImageToJpeg(uploadBytes);
+      if (!repaired) {
+        throw new GrainError("image_dimensions_failed", `Could not read image dimensions for ${media.sourceLabel}`);
+      }
+
+      console.log(`Repaired unreadable image dimensions for ${media.sourceLabel}; converted to JPEG.`);
+      uploadBytes = repaired;
+      mimeType = "image/jpeg";
+      dimensions = await readImageDimensions(uploadBytes, media.sourceLabel);
     }
 
     let alt = clean(options.altTexts?.[index]);
     if (!alt && options.altAi) {
       try {
-        alt = await generateAltTextFromImage(options.altAi, uploadBytes, media.mimeType);
+        alt = await generateAltTextFromImage(options.altAi, uploadBytes, mimeType);
         console.log(`Generated alt text for ${media.sourceLabel}`);
       } catch (error) {
         if (!options.onAltTextNeeded) {
@@ -237,7 +315,7 @@ export async function uploadGallery(options: UploadGalleryOptions): Promise<Uplo
           sourceValue: media.sourceValue,
           sourceLabel: media.sourceLabel,
           bytes: uploadBytes,
-          mimeType: media.mimeType,
+          mimeType,
           reason: "ai_failed",
           errorMessage: error instanceof Error ? error.message : String(error),
         }));
@@ -252,7 +330,7 @@ export async function uploadGallery(options: UploadGalleryOptions): Promise<Uplo
         sourceValue: media.sourceValue,
         sourceLabel: media.sourceLabel,
         bytes: uploadBytes,
-        mimeType: media.mimeType,
+        mimeType,
         reason: "missing",
       }));
     }
@@ -260,6 +338,7 @@ export async function uploadGallery(options: UploadGalleryOptions): Promise<Uplo
     preparedUploads.push({
       ...media,
       bytes: uploadBytes,
+      mimeType,
       width: dimensions.width,
       height: dimensions.height,
       alt,
