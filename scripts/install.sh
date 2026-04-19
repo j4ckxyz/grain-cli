@@ -23,12 +23,12 @@ fi
 
 cd "${INSTALL_DIR}"
 bun install --frozen-lockfile
-
-# Re-point an existing global install to the managed directory.
-bun remove -g grain-cli >/dev/null 2>&1 || true
-bun install -g "${INSTALL_DIR}"
-
 BIN_DIR="$(bun pm -g bin)"
+mkdir -p "${BIN_DIR}"
+
+# Link binaries directly so repeated installs stay idempotent.
+ln -sf "${INSTALL_DIR}/bin/grain" "${BIN_DIR}/grain"
+ln -sf "${INSTALL_DIR}/bin/grain-cli" "${BIN_DIR}/grain-cli"
 if [[ ":$PATH:" != *":${BIN_DIR}:"* ]]; then
   SHELL_NAME="$(basename "${SHELL:-}")"
   if [ "${SHELL_NAME}" = "zsh" ]; then
