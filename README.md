@@ -20,6 +20,12 @@ grain whoami
 grain logout
 ```
 
+Small interactive animations are enabled in TTY by default. Disable them with:
+
+```bash
+GRAIN_NO_ANIM=1 grain
+```
+
 Run `grain` with no subcommand to open the interactive upload wizard.
 
 ## Upload basics

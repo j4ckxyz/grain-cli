@@ -8,6 +8,24 @@ import { getAuthorizedAgent, loginWithOAuth, logoutOAuth } from "./oauth";
 import { promptForAltTextFallback, runUploadWizard } from "./tui";
 import type { AltAiConfig, MediaInput } from "./types";
 
+const LENS_FRAMES = ["[lens: .  ]", "[lens: .. ]", "[lens: ...]", "[lens: clear]"];
+
+function terminalAnimationEnabled(): boolean {
+  return Boolean(process.stdout.isTTY && process.env.CI !== "true" && process.env.TERM !== "dumb" && process.env.GRAIN_NO_ANIM !== "1");
+}
+
+async function animateStatus(label: string, frames: string[], delayMs = 70): Promise<void> {
+  if (!terminalAnimationEnabled()) {
+    return;
+  }
+
+  for (const frame of frames) {
+    process.stdout.write(`\r${label} ${frame}`);
+    await Bun.sleep(delayMs);
+  }
+  process.stdout.write(`\r${label} [ready]      \n`);
+}
+
 function printHelp(): void {
   console.log(`grain
 
@@ -96,7 +114,7 @@ async function cmdLogin(argv: string[]): Promise<void> {
     throw new GrainError("missing_handle", "Handle is required for login.");
   }
 
-  console.log("Starting secure browser login...");
+  await animateStatus("Starting secure browser login", LENS_FRAMES, 65);
   const result = await loginWithOAuth(handle);
 
   console.log(`Logged in as ${result.handle}`);

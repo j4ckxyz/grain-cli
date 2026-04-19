@@ -10,6 +10,25 @@ type Prompt = {
   askYesNo(message: string, defaultYes?: boolean): Promise<boolean>;
 };
 
+const FOCUS_FRAMES = ["[focus: .  ]", "[focus: .. ]", "[focus: ...]", "[focus: ok ]"];
+const SHUTTER_FRAMES = ["[shutter: open ]", "[shutter: half ]", "[shutter: click]", "[shutter: open ]"];
+
+function animationsEnabled(): boolean {
+  return Boolean(process.stdout.isTTY && process.env.CI !== "true" && process.env.TERM !== "dumb" && process.env.GRAIN_NO_ANIM !== "1");
+}
+
+async function animateLine(label: string, frames: string[], delayMs = 70): Promise<void> {
+  if (!animationsEnabled()) {
+    return;
+  }
+
+  for (const frame of frames) {
+    process.stdout.write(`\r${label} ${frame}`);
+    await Bun.sleep(delayMs);
+  }
+  process.stdout.write(`\r${label} [done]        \n`);
+}
+
 function normalizeAscii(value: string): string {
   return value
     .normalize("NFKD")
@@ -120,6 +139,7 @@ export async function runUploadWizard(): Promise<UploadWizardResult> {
   const prompt = buildPrompt();
 
   console.log("grain - interactive gallery upload");
+  await animateLine("Setting up your gallery", FOCUS_FRAMES);
   console.log("Tip: local paths must start with @, for example @photo.jpg or @./images/a.png");
 
   const title = await prompt.askText("Gallery title");
@@ -172,6 +192,7 @@ export async function runUploadWizard(): Promise<UploadWizardResult> {
     }
     try {
       mediaInputs.push(parseWizardMediaEntry(value));
+      await animateLine(`Framed image ${mediaInputs.length}`, SHUTTER_FRAMES, 60);
     } catch (error) {
       console.log(error instanceof Error ? error.message : String(error));
     }
@@ -215,6 +236,7 @@ export async function promptForAltTextFallback(context: {
     console.log(`AI alt text failed for ${context.sourceLabel}: ${context.errorMessage ?? "unknown error"}`);
   }
 
+  await animateLine("Opening preview", FOCUS_FRAMES, 60);
   await openInNativeViewer(context.bytes, context.mimeType);
   const value = await prompt.askText(`Alt text for image ${context.index + 1}/${context.total} (${context.sourceLabel})`, {
     allowEmpty: true,
