@@ -9,7 +9,9 @@
   },
   "scripts": {
     "start": "bun run src/cli.ts",
-    "test": "bun test"
+    "test": "bun test",
+    "typecheck": "bunx tsc --noEmit",
+    "check": "bun test && bunx tsc --noEmit"
   },
   "dependencies": {
     "@atproto/api": "^0.19.9",
