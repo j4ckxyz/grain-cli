@@ -7,6 +7,7 @@ import { normalizeLocalPathToken, parsePositionalMediaToken } from "./media-inpu
 import { getAuthorizedAgent, loginWithOAuth, logoutOAuth } from "./oauth";
 import { promptForAltTextFallback, runUploadWizard } from "./tui";
 import type { AltAiConfig, MediaInput } from "./types";
+import { runSelfUpdate } from "./update";
 
 const LENS_FRAMES = ["[lens: .  ]", "[lens: .. ]", "[lens: ...]", "[lens: clear]"];
 
@@ -42,6 +43,7 @@ Commands:
   grain help
   grain login [--handle <handle>]
   grain whoami [--debug]
+  grain update
   grain logout
   grain upload-gallery --title <title> [--description <text>] [--location-name <name>] [--location-value <h3>] [--country <code>] [--locality <name>] [--region <name>] [--street <value>] [--postal-code <code>] [--place-name <name>] [--cw <label1,label2>] [--alt <text> ...] [--image <path> ...] [--image-url <url> ...] [--exif include|exclude] [--alt-ai-endpoint <url> --alt-ai-api-key <key> --alt-ai-model <model>] <image-path-or-url ...>
 
@@ -144,6 +146,10 @@ async function cmdWhoAmI(argv: string[]): Promise<void> {
 async function cmdLogout(): Promise<void> {
   await logoutOAuth();
   console.log("Logged out and removed saved OAuth session.");
+}
+
+async function cmdUpdate(): Promise<void> {
+  await runSelfUpdate();
 }
 
 function parseAltAi(parsed: ReturnType<typeof parseArgs>): AltAiConfig | undefined {
@@ -336,6 +342,10 @@ async function run(): Promise<void> {
     }
     case "logout": {
       await cmdLogout();
+      break;
+    }
+    case "update": {
+      await cmdUpdate();
       break;
     }
     case "upload-gallery": {

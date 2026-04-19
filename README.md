@@ -17,6 +17,7 @@ grain
 grain help
 grain login --handle j4ck.xyz
 grain whoami
+grain update
 grain logout
 ```
 
