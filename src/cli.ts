@@ -7,7 +7,7 @@ import { buildGrainGalleryUrl, buildGrainLibraryUrl } from "./links";
 import { normalizeLocalPathToken, parsePositionalMediaToken } from "./media-input";
 import { getAuthorizedAgent, getSessionInfo, loginWithOAuth, logoutOAuth } from "./oauth";
 import { clearQueue, enqueueUpload, listQueuedUploads, removeQueuedUpload, updateQueuedUpload } from "./queue";
-import { promptForAltTextFallback, reviewUploadPlan, runStartFlow, runUploadWizard } from "./tui";
+import { editAltTextsInReview, promptForAltTextFallback, reviewUploadPlan, runStartFlow, runUploadWizard } from "./tui";
 import type { AltAiConfig, MediaInput, PostingStyle } from "./types";
 import { runSelfUpdate } from "./update";
 
@@ -544,6 +544,13 @@ async function runGuidedPost(initial?: UploadDraft): Promise<void> {
       wizard = await runUploadWizard(wizard);
       continue;
     }
+    if (review === "edit_alt") {
+      wizard = {
+        ...wizard,
+        altTexts: await editAltTextsInReview(wizard),
+      };
+      continue;
+    }
 
     if (review === "save_draft") {
       const saved = await saveDraft(draftInputFromUpload(wizard));
@@ -621,6 +628,13 @@ async function cmdStart(): Promise<void> {
     const review = await reviewUploadPlan(upload);
     if (review === "edit") {
       upload = await runUploadWizard(upload);
+      continue;
+    }
+    if (review === "edit_alt") {
+      upload = {
+        ...upload,
+        altTexts: await editAltTextsInReview(upload),
+      };
       continue;
     }
     if (review === "save_draft") {

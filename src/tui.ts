@@ -574,25 +574,45 @@ export async function runStartFlow(input: {
   };
 }
 
-export async function reviewUploadPlan(upload: UploadWizardResult): Promise<"publish" | "edit" | "save_draft"> {
+export async function reviewUploadPlan(upload: UploadWizardResult): Promise<"publish" | "edit" | "edit_alt" | "save_draft"> {
   const prompt = buildPrompt();
   console.log("\nReview before publish");
   console.log(`- Title: ${upload.title}`);
   console.log(`- Description: ${upload.description ?? "(none)"}`);
   console.log(`- Images: ${upload.mediaInputs.length}`);
+  console.log(`- Alt text: ${upload.altAi ? "AI" : "manual/off"} (${upload.altTexts.filter((value) => value.trim().length > 0).length}/${upload.mediaInputs.length} set)`);
   console.log(`- EXIF: ${upload.exifMode}`);
   if (upload.scheduleAt) {
     console.log(`- Schedule: ${upload.scheduleAt}`);
   }
 
-  const choice = await prompt.askChoice("Choose next step", ["Publish", "Edit details", "Save draft for later"], 0);
+  const choice = await prompt.askChoice("Choose next step", ["Publish", "Edit details", "Edit alt text", "Save draft for later"], 0);
   if (choice === 1) {
     return "edit";
   }
   if (choice === 2) {
+    return "edit_alt";
+  }
+  if (choice === 3) {
     return "save_draft";
   }
   return "publish";
+}
+
+export async function editAltTextsInReview(upload: UploadWizardResult): Promise<string[]> {
+  const prompt = buildPrompt();
+  const next = [...upload.altTexts];
+
+  for (let i = 0; i < upload.mediaInputs.length; i += 1) {
+    const current = next[i] ?? "";
+    const updated = await prompt.askText(`Alt text for image ${i + 1}/${upload.mediaInputs.length} (${upload.mediaInputs[i].value})`, {
+      allowEmpty: true,
+      defaultValue: current || undefined,
+    });
+    next[i] = normalizeAscii(updated);
+  }
+
+  return next;
 }
 
 export async function promptForAltTextFallback(context: {
@@ -608,6 +628,15 @@ export async function promptForAltTextFallback(context: {
 
   if (context.reason === "ai_failed") {
     console.log(`AI alt text failed for ${context.sourceLabel}: ${context.errorMessage ?? "unknown error"}`);
+    const enterManual = await prompt.askYesNo("Enter manual alt text now?", true);
+    if (!enterManual) {
+      return undefined;
+    }
+
+    const value = await prompt.askText(`Manual alt text for image ${context.index + 1}/${context.total} (${context.sourceLabel})`, {
+      allowEmpty: true,
+    });
+    return normalizeAscii(value) || undefined;
   }
 
   await animateLine("Opening preview", FOCUS_FRAMES, 60);

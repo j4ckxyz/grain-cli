@@ -3,8 +3,15 @@ import { GrainError } from "./errors";
 
 type OpenAiCompatibleResponse = {
   choices?: Array<{
+    finish_reason?: string;
     message?: {
-      content?: string;
+      content?:
+        | string
+        | Array<{
+            type?: string;
+            text?: string;
+            content?: string;
+          }>;
       reasoning?: string;
       reasoning_details?: Array<{
         type?: string;
@@ -67,67 +74,142 @@ function buildPrompt(): string {
   ].join("\n");
 }
 
+function extractMessageTextContent(
+  content:
+    | string
+    | Array<{
+        type?: string;
+        text?: string;
+        content?: string;
+      }>
+    | undefined,
+): string | undefined {
+  if (typeof content === "string") {
+    const text = content.trim();
+    return text || undefined;
+  }
+
+  if (!Array.isArray(content)) {
+    return undefined;
+  }
+
+  const merged = content
+    .map((part) => {
+      if (!part || typeof part !== "object") {
+        return "";
+      }
+      if (typeof part.text === "string") {
+        return part.text;
+      }
+      if (typeof part.content === "string") {
+        return part.content;
+      }
+      return "";
+    })
+    .join(" ")
+    .trim();
+
+  return merged || undefined;
+}
+
+function buildReasoningPayload(config: AltAiConfig): { effort: string; exclude: boolean } {
+  if (config.reasoningEffort && config.reasoningEffort !== "none") {
+    return {
+      effort: config.reasoningEffort,
+      exclude: config.showReasoning === true ? false : true,
+    };
+  }
+
+  return {
+    effort: "none",
+    exclude: true,
+  };
+}
+
+async function requestAltCompletion(input: {
+  config: AltAiConfig;
+  prompt: string;
+  imageDataUrl: string;
+  reasoning: { effort: string; exclude: boolean };
+}): Promise<OpenAiCompatibleResponse> {
+  const endpoint = input.config.endpoint.replace(/\/$/, "");
+  const timeoutController = new AbortController();
+  const timeout = setTimeout(() => timeoutController.abort(), 90_000);
+  if (typeof timeout === "object" && timeout !== null && "unref" in timeout) {
+    const maybeTimer = timeout as { unref?: () => void };
+    maybeTimer.unref?.();
+  }
+
+  try {
+    const response = await fetch(`${endpoint}/chat/completions`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${input.config.apiKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        model: input.config.model,
+        messages: [
+          {
+            role: "system",
+            content: input.prompt,
+          },
+          {
+            role: "user",
+            content: [
+              {
+                type: "text",
+                text: "Create the highest quality alt text for this image.",
+              },
+              {
+                type: "image_url",
+                image_url: {
+                  url: input.imageDataUrl,
+                },
+              },
+            ],
+          },
+        ],
+        temperature: 0.2,
+        max_tokens: 400,
+        reasoning: input.reasoning,
+      }),
+      signal: timeoutController.signal,
+    });
+
+    const text = await response.text();
+    if (!response.ok) {
+      throw new GrainError("alt_ai_request_failed", `Alt-text API request failed (${response.status}): ${text}`);
+    }
+
+    return JSON.parse(text) as OpenAiCompatibleResponse;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new GrainError("alt_ai_timeout", "Alt-text API request timed out.", "Try a faster model or reduce reasoning effort.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 export async function generateAltTextFromImage(
   config: AltAiConfig,
   imageBytes: Uint8Array,
   mimeType: string,
 ): Promise<string> {
   const base64 = Buffer.from(imageBytes).toString("base64");
-  const endpoint = config.endpoint.replace(/\/$/, "");
-  const body = {
-    model: config.model,
-    messages: [
-      {
-        role: "system",
-        content: buildPrompt(),
-      },
-      {
-        role: "user",
-        content: [
-          {
-            type: "text",
-            text: "Create the highest quality alt text for this image.",
-          },
-          {
-            type: "image_url",
-            image_url: {
-              url: `data:${mimeType};base64,${base64}`,
-            },
-          },
-        ],
-      },
-    ],
-    temperature: 0.2,
-    max_tokens: 180,
-    reasoning:
-      config.reasoningEffort && config.reasoningEffort !== "none"
-        ? {
-            effort: config.reasoningEffort,
-            exclude: config.showReasoning === true ? false : true,
-          }
-        : {
-            effort: "none",
-            exclude: true,
-          },
-  };
-
-  const response = await fetch(`${endpoint}/chat/completions`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${config.apiKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify(body),
+  const imageDataUrl = `data:${mimeType};base64,${base64}`;
+  const prompt = buildPrompt();
+  const firstResponse = await requestAltCompletion({
+    config,
+    prompt,
+    imageDataUrl,
+    reasoning: buildReasoningPayload(config),
   });
 
-  const text = await response.text();
-  if (!response.ok) {
-    throw new GrainError("alt_ai_request_failed", `Alt-text API request failed (${response.status}): ${text}`);
-  }
-
-  const parsed = JSON.parse(text) as OpenAiCompatibleResponse;
   if (config.showReasoning) {
-    const msg = parsed.choices?.[0]?.message;
+    const msg = firstResponse.choices?.[0]?.message;
     const reasoning = msg?.reasoning?.trim();
     const details = msg?.reasoning_details ?? [];
     const summary = details
@@ -142,7 +224,29 @@ export async function generateAltTextFromImage(
     }
   }
 
-  const raw = parsed.choices?.[0]?.message?.content?.trim();
+  let raw = extractMessageTextContent(firstResponse.choices?.[0]?.message?.content);
+  if (!raw && config.reasoningEffort && config.reasoningEffort !== "none") {
+    const retryResponse = await requestAltCompletion({
+      config,
+      prompt,
+      imageDataUrl,
+      reasoning: {
+        effort: "none",
+        exclude: true,
+      },
+    });
+    raw = extractMessageTextContent(retryResponse.choices?.[0]?.message?.content);
+    if (!raw) {
+      const finishReason = retryResponse.choices?.[0]?.finish_reason;
+      throw new GrainError(
+        "alt_ai_empty_response",
+        finishReason
+          ? `Alt-text API returned an empty response (finish reason: ${finishReason}).`
+          : "Alt-text API returned an empty response.",
+      );
+    }
+  }
+
   if (!raw) {
     throw new GrainError("alt_ai_empty_response", "Alt-text API returned an empty response.");
   }

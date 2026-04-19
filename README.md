@@ -77,6 +77,7 @@ Run `grain` with no subcommand (or `grain start`) for the guided posting flow.
 - Advanced options are optional and grouped behind one prompt (schedule, retry queue, EXIF, location, photo reorder, save style).
 - Retry queue and EXIF preferences are remembered for next time.
 - Includes a **Review before publish** step where you can publish, edit, or save draft.
+- Review also lets you edit alt text for each image before posting.
 - You can save unfinished galleries and resume later with `grain drafts resume --id <draft-id>`.
 - Optional scheduling: choose a future publish time and it is added to queue.
 - Optional retry queue: if network upload fails, it can auto-save to queue and retry later.
