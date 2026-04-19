@@ -23,6 +23,9 @@ fi
 
 cd "${INSTALL_DIR}"
 bun install --frozen-lockfile
+
+# Re-point an existing global install to the managed directory.
+bun remove -g grain-cli >/dev/null 2>&1 || true
 bun install -g "${INSTALL_DIR}"
 
 BIN_DIR="$(bun pm -g bin)"
