@@ -1,0 +1,11 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.gallery.item/3mjpq3evftk2r",
+  "cid": "bafyreidxq5fveozd4ryjcxifc57n6ivwsxflptfznwmfshuinbcko6wkvm",
+  "value": {
+    "$type": "social.grain.gallery.item",
+    "item": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.photo/3mjpq3byn4u2y",
+    "gallery": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.gallery/3mjpq3d6yj725",
+    "position": 2,
+    "createdAt": "2026-04-17T20:08:03.450Z"
+  }
+}

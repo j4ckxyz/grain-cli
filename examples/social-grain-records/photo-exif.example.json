@@ -1,0 +1,19 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.photo.exif/3mjpq3cmugp25",
+  "cid": "bafyreifoksi23hs4uks5hzrtq6ff26gurmcomgxwpejekscgym6ymbqtjy",
+  "value": {
+    "$type": "social.grain.photo.exif",
+    "photo": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.photo/3mjpq3byn4u2y",
+    "make": "Apple",
+    "model": "iPhone 16",
+    "lensMake": "Apple",
+    "lensModel": "iPhone 16 back dual wide camera 5.96mm f/1.6",
+    "fNumber": 1600000,
+    "iSO": 32000000,
+    "exposureTime": 1028,
+    "focalLengthIn35mmFormat": 72000000,
+    "flash": "Flash did not fire, compulsory flash mode",
+    "dateTimeOriginal": "2026-04-17T14:39:15.000Z",
+    "createdAt": "2026-04-17T20:08:03.450Z"
+  }
+}

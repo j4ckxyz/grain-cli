@@ -1,0 +1,25 @@
+{
+  "name": "grain-cli",
+  "version": "0.1.0",
+  "description": "ATProto CLI for posting Grain.social galleries",
+  "type": "module",
+  "bin": {
+    "grain": "bin/grain",
+    "grain-cli": "bin/grain-cli"
+  },
+  "scripts": {
+    "start": "bun run src/cli.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@atproto/api": "^0.19.9",
+    "@atproto/oauth-client-node": "^0.3.17",
+    "exifr": "^7.1.3",
+    "image-size": "^1.1.1",
+    "sharp": "^0.34.5"
+  },
+  "devDependencies": {
+    "@types/bun": "latest",
+    "typescript": "^5.6.3"
+  }
+}

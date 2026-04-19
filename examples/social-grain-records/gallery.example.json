@@ -1,0 +1,20 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.gallery/3mjpq3d6yj725",
+  "cid": "bafyreihcgukpuqmg5g7khii53fwbxpqobp6wklfe2tvjni5feksfb33mxu",
+  "value": {
+    "$type": "social.grain.gallery",
+    "title": "capybara",
+    "address": {
+      "name": "Jersey Zoo",
+      "street": "La Profonde Rue",
+      "country": "JE",
+      "locality": "Trinity",
+      "postalCode": "JE3 5BP"
+    },
+    "location": {
+      "name": "Jersey Zoo",
+      "value": "8a186295340ffff"
+    },
+    "createdAt": "2026-04-17T20:08:03.450Z"
+  }
+}

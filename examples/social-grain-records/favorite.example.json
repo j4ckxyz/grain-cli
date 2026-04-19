@@ -1,0 +1,9 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.favorite/3mju2hsuq4i2y",
+  "cid": "bafyreibchquzo2gapqyjr6z4rwvqyvemuz3655quvn7yvhxa5voq4y733a",
+  "value": {
+    "$type": "social.grain.favorite",
+    "subject": "at://did:plc:przcew7gy3mup5sv4kyjevl6/social.grain.gallery/3mjthgafvhx2c",
+    "createdAt": "2026-04-19T13:24:53.793Z"
+  }
+}

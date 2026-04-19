@@ -1,0 +1,21 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.photo/3mjpq3byn4u2y",
+  "cid": "bafyreihhvdemqjch2dv4qyo3kl5c3wqria2sugbvqbsq7fbuhk2meywlqa",
+  "value": {
+    "$type": "social.grain.photo",
+    "alt": "A capybara sits in a grassy area with tall green plants, a tree to the left, and a wooden fence in the background.",
+    "photo": {
+      "ref": {
+        "$link": "bafkreigqjhzfriue776q5p3l55gwiqqzwys6u7eyijw2p4u5dt234ebgsi"
+      },
+      "size": 880613,
+      "$type": "blob",
+      "mimeType": "image/jpeg"
+    },
+    "createdAt": "2026-04-17T20:08:03.450Z",
+    "aspectRatio": {
+      "width": 1500,
+      "height": 2000
+    }
+  }
+}

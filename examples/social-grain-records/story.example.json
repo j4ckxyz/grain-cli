@@ -1,0 +1,28 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.story/3mjm4kabdkt2p",
+  "cid": "bafyreie67f5oscdawbvkuf63aaok6km7pb5j3qen7youydyk5bpzacobiq",
+  "value": {
+    "$type": "social.grain.story",
+    "media": {
+      "ref": {
+        "$link": "bafkreicnlftwm6b4cuf6xhtk5mhpcao65gxkoqsyerkoj53ymgbmh7wpzu"
+      },
+      "size": 895631,
+      "$type": "blob",
+      "mimeType": "image/jpeg"
+    },
+    "address": {
+      "country": "JE",
+      "locality": "St Ouen"
+    },
+    "location": {
+      "name": "St Ouen",
+      "value": "8a1862806aa7fff"
+    },
+    "createdAt": "2026-04-16T09:40:44.611Z",
+    "aspectRatio": {
+      "width": 2000,
+      "height": 1333
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "uri": "at://did:plc:4hawmtgzjx3vclfyphbhfn7v/social.grain.actor.profile/self",
+  "cid": "bafyreif3lhmikwqxnyguvkhpjneujem5433n5lsaxweauhz3ayfexhlaky",
+  "value": {
+    "$type": "social.grain.actor.profile",
+    "avatar": {
+      "ref": {
+        "$link": "bafkreihx4cuuwhjlguhzyltg4ihenbxybv7oz7uu65dclubmzytfteuudu"
+      },
+      "size": 325227,
+      "$type": "blob",
+      "mimeType": "image/jpeg"
+    },
+    "createdAt": "2026-04-14T07:19:09.113Z",
+    "description": "i play guitar | occasionally interested in (interesting) technology | follow for random skeets | https://j4ck.xyz",
+    "displayName": "jack"
+  }
+}
