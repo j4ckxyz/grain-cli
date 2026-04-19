@@ -149,7 +149,7 @@ function createClient(clientId: string, redirectUri: string, scope: string): Nod
   });
 }
 
-async function waitForOAuthCallback(expectedState: string, redirectPort: number, timeoutMs = 180000): Promise<URLSearchParams> {
+async function waitForOAuthCallback(redirectPort: number, timeoutMs = 180000): Promise<URLSearchParams> {
   let resolveResult!: (params: URLSearchParams) => void;
   let rejectResult!: (error: Error) => void;
 
@@ -170,12 +170,6 @@ async function waitForOAuthCallback(expectedState: string, redirectPort: number,
         const url = new URL(request.url);
         if (url.pathname !== CALLBACK_PATH) {
           return new Response("Not found", { status: 404 });
-        }
-
-        const state = url.searchParams.get("state");
-        if (state !== expectedState) {
-          rejectResult(new GrainError("oauth_state_mismatch", "OAuth state mismatch. Login was rejected."));
-          return new Response("State mismatch. You can close this tab.", { status: 400 });
         }
 
         resolveResult(url.searchParams);
@@ -251,21 +245,26 @@ export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> 
   const clientId = buildLoopbackClientId(redirectUri, scope);
   const oauthClient = createClient(clientId, redirectUri, scope);
 
-  const state = randomBytes(16).toString("hex");
+  const appState = randomBytes(16).toString("hex");
   const authorizeUrl = await oauthClient.authorize(handle, {
     scope,
-    state,
+    state: appState,
   });
+
+  const callbackPromise = waitForOAuthCallback(redirectPort);
 
   console.log("Open the following URL to continue login:");
   console.log(authorizeUrl.toString());
   await maybeOpenBrowser(authorizeUrl.toString());
 
-  const callbackParams = await waitForOAuthCallback(state, redirectPort);
+  const callbackParams = await callbackPromise;
 
   let session: OAuthSession;
   try {
     const result = await oauthClient.callback(callbackParams);
+    if (result.state !== appState) {
+      throw new GrainError("oauth_state_mismatch", "OAuth state mismatch. Login was rejected.");
+    }
     session = result.session;
   } catch (error) {
     if (error instanceof OAuthCallbackError) {
