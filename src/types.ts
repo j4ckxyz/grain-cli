@@ -7,6 +7,16 @@ export type OAuthConfig = {
   loginAt: string;
 };
 
+export type AltAiReasoningEffort = "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+
+export type AltAiAuthConfig = {
+  endpoint: string;
+  apiKey: string;
+  model: string;
+  reasoningEffort: AltAiReasoningEffort;
+  showReasoning: boolean;
+};
+
 export type PostingStyle = {
   name: string;
   description?: string;
@@ -25,6 +35,7 @@ export type PostingStyle = {
 export type AppConfig = {
   oauth?: OAuthConfig;
   styles?: PostingStyle[];
+  altAi?: AltAiAuthConfig;
 };
 
 export type RichTextFacet = {
@@ -66,4 +77,6 @@ export type AltAiConfig = {
   endpoint: string;
   apiKey: string;
   model: string;
+  reasoningEffort?: AltAiReasoningEffort;
+  showReasoning?: boolean;
 };

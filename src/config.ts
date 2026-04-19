@@ -33,6 +33,11 @@ export async function loadConfig(): Promise<AppConfig | null> {
       throw new Error(`Invalid OAuth config format at ${path}`);
     }
   }
+  if (parsed.altAi) {
+    if (!parsed.altAi.endpoint || !parsed.altAi.apiKey || !parsed.altAi.model) {
+      throw new Error(`Invalid alt AI config format at ${path}`);
+    }
+  }
   return parsed;
 }
 

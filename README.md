@@ -20,10 +20,47 @@ grain login --handle j4ck.xyz
 grain whoami
 grain update
 grain logout
+grain auth login
+grain auth status
+grain auth logout
 grain drafts list
 grain queue run
 grain styles list
 ```
+
+## Alt-text AI setup (easy)
+
+Set your AI provider once:
+
+```bash
+grain auth login
+```
+
+This saves:
+
+- OpenAI-compatible endpoint (example: `https://openrouter.ai/api/v1`)
+- API key
+- vision-capable model id (required; the model must support image input)
+- reasoning level (`none|minimal|low|medium|high|xhigh`)
+- whether reasoning should be shown in terminal
+
+OpenRouter example values:
+
+- Endpoint: `https://openrouter.ai/api/v1`
+- Model: `google/gemini-3-flash-preview` (vision capable)
+
+Check or clear saved AI auth:
+
+```bash
+grain auth status
+grain auth logout
+```
+
+Reasoning behavior:
+
+- If reasoning level is `none`, reasoning is disabled in requests.
+- If reasoning is enabled, grain requests reasoning but only prints it when returned by the provider/model.
+- If no reasoning is returned, grain prints that it was not returned.
 
 Small interactive animations are enabled in TTY by default. Disable them with:
 
@@ -105,6 +142,16 @@ Media formats:
   - `~/.config/grain-cli/config.json`
 
 Files are written with user-only permissions (`0600`).
+
+## Versioning and updates
+
+- Grain uses semantic versioning: `x.y.z`
+  - `x`: breaking changes
+  - `y`: new features (backward-compatible)
+  - `z`: fixes and polish
+- `grain update` now checks if you're already current.
+  - If already current, it prints that you're on latest and exits.
+  - If not current, it installs and prints a clean before/after update message.
 
 ## Notes on local dev install
 

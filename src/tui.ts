@@ -42,6 +42,17 @@ function normalizeAscii(value: string): string {
     .trim();
 }
 
+function normalizeReasoningEffort(value: string | undefined): AltAiConfig["reasoningEffort"] {
+  const next = (value ?? "none").trim().toLowerCase();
+  if (!next) {
+    return "none";
+  }
+  if (next === "none" || next === "minimal" || next === "low" || next === "medium" || next === "high" || next === "xhigh") {
+    return next;
+  }
+  throw new GrainError("invalid_reasoning_effort", "Reasoning level must be one of: none|minimal|low|medium|high|xhigh.");
+}
+
 function buildPrompt(): Prompt {
   const stdin = process.stdin;
   const stdout = process.stdout;
@@ -232,10 +243,18 @@ export async function runUploadWizard(initial: Partial<UploadWizardResult> = {})
     const model = await prompt.askText("Alt AI model", {
       defaultValue: initial.altAi?.model ?? process.env.GRAIN_ALT_AI_MODEL,
     });
+    const reasoningEffortRaw = await prompt.askText("Reasoning level (none|minimal|low|medium|high|xhigh)", {
+      allowEmpty: true,
+      defaultValue: initial.altAi?.reasoningEffort ?? process.env.GRAIN_ALT_AI_REASONING ?? "none",
+    });
+    const showReasoning = await prompt.askYesNo("Show model reasoning in terminal if available?", initial.altAi?.showReasoning ?? false);
+
     altAi = {
       endpoint: endpoint.replace(/\/$/, ""),
       apiKey,
       model,
+      reasoningEffort: normalizeReasoningEffort(reasoningEffortRaw || "none"),
+      showReasoning,
     };
   }
 
@@ -316,6 +335,7 @@ function styleToWizardBase(style: PostingStyle): Partial<UploadWizardResult> {
 export async function runStartFlow(input: {
   styles: PostingStyle[];
   draftCount: number;
+  defaultAltAi?: AltAiConfig;
 }): Promise<StartFlowResult> {
   const prompt = buildPrompt();
   console.log("grain start - guided posting");
@@ -349,7 +369,10 @@ export async function runStartFlow(input: {
     }
   }
 
-  const upload = await runUploadWizard(chosenStyle ? styleToWizardBase(chosenStyle) : {});
+  const upload = await runUploadWizard({
+    ...(chosenStyle ? styleToWizardBase(chosenStyle) : {}),
+    altAi: input.defaultAltAi,
+  });
 
   const scheduleInput = await prompt.askText("Schedule time (optional, ISO format)", {
     allowEmpty: true,

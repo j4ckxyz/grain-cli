@@ -42,6 +42,9 @@ Commands:
   grain whoami --debug
   grain update
   grain logout
+  grain auth login
+  grain auth status
+  grain auth logout
   grain drafts [list|resume|delete] [--id <draft-id>]
   grain queue [list|run|clear]
   grain styles [list|save|delete] [--name <style-name>]
@@ -49,6 +52,17 @@ Commands:
 
 Run without a command to start guided posting.
 `);
+}
+
+function normalizeReasoningEffort(value: string | undefined): "none" | "minimal" | "low" | "medium" | "high" | "xhigh" {
+  const next = (value ?? "none").trim().toLowerCase();
+  if (!next) {
+    return "none";
+  }
+  if (next === "none" || next === "minimal" || next === "low" || next === "medium" || next === "high" || next === "xhigh") {
+    return next;
+  }
+  throw new GrainError("invalid_reasoning_effort", "Reasoning effort must be one of: none|minimal|low|medium|high|xhigh.");
 }
 
 function requireOption(options: Map<string, string[]>, name: string): string {
@@ -97,6 +111,8 @@ function parseAltAi(parsed: ReturnType<typeof parseArgs>): AltAiConfig | undefin
   const endpoint = getOption(parsed.options, "alt-ai-endpoint") ?? process.env.GRAIN_ALT_AI_ENDPOINT;
   const apiKey = getOption(parsed.options, "alt-ai-api-key") ?? process.env.GRAIN_ALT_AI_API_KEY;
   const model = getOption(parsed.options, "alt-ai-model") ?? process.env.GRAIN_ALT_AI_MODEL;
+  const reasoningEffort = normalizeReasoningEffort(getOption(parsed.options, "alt-ai-reasoning") ?? process.env.GRAIN_ALT_AI_REASONING);
+  const showReasoning = hasOption(parsed.options, "alt-ai-show-reasoning") || process.env.GRAIN_ALT_AI_SHOW_REASONING === "1";
 
   const hasAny = [endpoint, apiKey, model].some((value) => Boolean(value));
   if (!hasAny) {
@@ -114,7 +130,85 @@ function parseAltAi(parsed: ReturnType<typeof parseArgs>): AltAiConfig | undefin
     endpoint: endpoint.replace(/\/$/, ""),
     apiKey,
     model,
+    reasoningEffort,
+    showReasoning,
   };
+}
+
+async function cmdAuth(argv: string[]): Promise<void> {
+  const parsed = parseArgs(argv);
+  const sub = parsed.positional[0] ?? "status";
+
+  if (sub === "status") {
+    const config = await loadConfig();
+    if (!config?.altAi) {
+      console.log("Alt-text AI is not configured.");
+      return;
+    }
+    console.log("Alt-text AI is configured:");
+    console.log(`- Endpoint: ${config.altAi.endpoint}`);
+    console.log(`- Model: ${config.altAi.model}`);
+    console.log(`- Reasoning: ${config.altAi.reasoningEffort}`);
+    console.log(`- Show reasoning: ${config.altAi.showReasoning ? "yes" : "no"}`);
+    return;
+  }
+
+  if (sub === "logout") {
+    const config = (await loadConfig()) ?? {};
+    if (!config.altAi) {
+      console.log("Alt-text AI is already not configured.");
+      return;
+    }
+    await saveConfig({
+      ...config,
+      altAi: undefined,
+    });
+    console.log("Cleared saved Alt-text AI settings.");
+    return;
+  }
+
+  if (sub === "login") {
+    const endpoint = (getOption(parsed.options, "endpoint") ?? (await promptLine("OpenAI-compatible endpoint (e.g. https://openrouter.ai/api/v1)"))).trim();
+    const apiKey = (getOption(parsed.options, "api-key") ?? (await promptLine("API key"))).trim();
+    const model = (getOption(parsed.options, "model") ?? (await promptLine("Vision-capable model ID (required)")).trim());
+    const reasoningInput =
+      getOption(parsed.options, "reasoning") ??
+      (await promptLine("Reasoning level (none|minimal|low|medium|high|xhigh)", true));
+    const reasoningEffort = normalizeReasoningEffort(
+      reasoningInput || "none",
+    );
+    const showReasoningInput =
+      getOption(parsed.options, "show-reasoning") ?? (await promptLine("Show reasoning in terminal? (yes/no)", true));
+    const showReasoningRaw = showReasoningInput || "no";
+    const showReasoning = ["1", "y", "yes", "true"].includes(showReasoningRaw.trim().toLowerCase());
+
+    if (!endpoint || !apiKey || !model) {
+      throw new GrainError("invalid_auth_input", "Endpoint, API key, and model are required.");
+    }
+
+    const config = (await loadConfig()) ?? {};
+    await saveConfig({
+      ...config,
+      altAi: {
+        endpoint: endpoint.replace(/\/$/, ""),
+        apiKey,
+        model,
+        reasoningEffort,
+        showReasoning,
+      },
+    });
+
+    console.log("Saved Alt-text AI settings.");
+    console.log("Tip: use a vision-capable model (must support image input). Example via OpenRouter: google/gemini-3-flash-preview.");
+    if (reasoningEffort === "none") {
+      console.log("Reasoning: disabled.");
+    } else {
+      console.log(`Reasoning: enabled at '${reasoningEffort}' (${showReasoning ? "shown in terminal when returned" : "hidden in terminal"}).`);
+    }
+    return;
+  }
+
+  throw new GrainError("unknown_auth_command", `Unknown auth subcommand: ${sub}`);
 }
 
 function parseMediaInputs(parsed: ReturnType<typeof parseArgs>): MediaInput[] {
@@ -358,7 +452,19 @@ async function cmdUploadGallery(argv: string[]): Promise<void> {
   const locationValue = getOption(parsed.options, "location-value");
   const mediaInputs = parseMediaInputs(parsed);
   const altTexts = normalizeManualAltList(getOptionList(parsed.options, "alt"));
-  const altAi = parseAltAi(parsed);
+  const config = await loadConfig();
+  const altAiFromFlags = parseAltAi(parsed);
+  const altAi =
+    altAiFromFlags ??
+    (config?.altAi
+      ? {
+          endpoint: config.altAi.endpoint,
+          apiKey: config.altAi.apiKey,
+          model: config.altAi.model,
+          reasoningEffort: config.altAi.reasoningEffort,
+          showReasoning: config.altAi.showReasoning,
+        }
+      : undefined);
   const exifMode = normalizeExifMode(getOption(parsed.options, "exif"));
   const scheduleAt = getOption(parsed.options, "schedule-at");
   const cw = getOption(parsed.options, "cw");
@@ -459,10 +565,20 @@ async function runGuidedPost(initial?: UploadDraft): Promise<void> {
 
 async function cmdStart(): Promise<void> {
   const config = await loadConfig();
+  const defaultAltAi = config?.altAi
+    ? {
+        endpoint: config.altAi.endpoint,
+        apiKey: config.altAi.apiKey,
+        model: config.altAi.model,
+        reasoningEffort: config.altAi.reasoningEffort,
+        showReasoning: config.altAi.showReasoning,
+      }
+    : undefined;
   const drafts = await listDrafts();
   const startFlow = await runStartFlow({
     styles: config?.styles ?? [],
     draftCount: drafts.length,
+    defaultAltAi,
   });
 
   if (startFlow.action === "save_draft") {
@@ -708,6 +824,10 @@ async function run(): Promise<void> {
     }
     case "update": {
       await cmdUpdate();
+      break;
+    }
+    case "auth": {
+      await cmdAuth(rest);
       break;
     }
     case "upload-gallery": {

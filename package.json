@@ -1,6 +1,6 @@
 {
   "name": "grain-cli",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "ATProto CLI for posting Grain.social galleries",
   "type": "module",
   "bin": {

@@ -5,6 +5,12 @@ type OpenAiCompatibleResponse = {
   choices?: Array<{
     message?: {
       content?: string;
+      reasoning?: string;
+      reasoning_details?: Array<{
+        type?: string;
+        summary?: string;
+        text?: string | null;
+      }>;
     };
   }>;
 };
@@ -93,6 +99,16 @@ export async function generateAltTextFromImage(
     ],
     temperature: 0.2,
     max_tokens: 180,
+    reasoning:
+      config.reasoningEffort && config.reasoningEffort !== "none"
+        ? {
+            effort: config.reasoningEffort,
+            exclude: config.showReasoning === true ? false : true,
+          }
+        : {
+            effort: "none",
+            exclude: true,
+          },
   };
 
   const response = await fetch(`${endpoint}/chat/completions`, {
@@ -110,6 +126,22 @@ export async function generateAltTextFromImage(
   }
 
   const parsed = JSON.parse(text) as OpenAiCompatibleResponse;
+  if (config.showReasoning) {
+    const msg = parsed.choices?.[0]?.message;
+    const reasoning = msg?.reasoning?.trim();
+    const details = msg?.reasoning_details ?? [];
+    const summary = details
+      .map((item) => item.summary ?? item.text ?? "")
+      .find((value) => value.trim().length > 0);
+
+    const snippet = reasoning || summary;
+    if (snippet) {
+      console.log(`AI reasoning: ${trimToWordBoundary(sanitizeAltText(snippet), 180)}`);
+    } else {
+      console.log("AI reasoning: not returned by this model/provider.");
+    }
+  }
+
   const raw = parsed.choices?.[0]?.message?.content?.trim();
   if (!raw) {
     throw new GrainError("alt_ai_empty_response", "Alt-text API returned an empty response.");

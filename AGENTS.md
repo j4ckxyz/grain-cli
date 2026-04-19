@@ -59,9 +59,20 @@ Default to user-facing language. Mention protocol details only when they are nee
 
 ## Release/update flow
 
+## Versioning standard (required)
+
+- Use semantic versioning in `package.json` as `x.y.z`.
+- Increment rules:
+  - `x` (major): breaking behavior or incompatible command changes.
+  - `y` (minor): new features that are backward-compatible.
+  - `z` (patch): bug fixes, docs updates, and non-breaking polish.
+- Any user-facing release to GitHub/Tangled must include an intentional version decision.
+- `grain update` output should stay plain-language and user-facing (not implementation jargon).
+
 When shipping user-facing changes:
 
 1. Run `bun run check`.
-2. Keep README aligned with actual CLI behavior.
-3. Push to GitHub `main`.
-4. Mirror same `main` to Tangled remote.
+2. Bump `package.json` version according to semantic versioning.
+3. Keep README aligned with actual CLI behavior.
+4. Push to GitHub `main`.
+5. Mirror same `main` to Tangled remote.
