@@ -15,6 +15,7 @@ import {
 import { GrainError } from "./errors";
 import { getConfigPath, loadConfig, saveConfig } from "./config";
 import { buildGrainLibraryUrl } from "./links";
+import type { OAuthConfig } from "./types";
 
 const LOOPBACK_ORIGIN = "http://localhost";
 const GRAIN_REPO_SCOPES = [
@@ -30,10 +31,23 @@ const GRAIN_REPO_SCOPES = [
 ] as const;
 const DEFAULT_SCOPE = ["atproto", "blob:image/*", ...GRAIN_REPO_SCOPES].join(" ");
 const CALLBACK_PATH = "/callback";
+type StoredOAuthConfig = OAuthConfig | undefined;
 
 type OAuthStores = {
-  stateStore: NodeSavedStateStore;
-  sessionStore: NodeSavedSessionStore;
+  stateStore: {
+    get(key: string): Promise<NodeSavedState | undefined>;
+    set(key: string, value: NodeSavedState): Promise<void>;
+    del(key: string): Promise<void>;
+    clear(): Promise<void>;
+    all(): Promise<Record<string, NodeSavedState>>;
+  };
+  sessionStore: {
+    get(key: string): Promise<NodeSavedSession | undefined>;
+    set(key: string, value: NodeSavedSession): Promise<void>;
+    del(key: string): Promise<void>;
+    clear(): Promise<void>;
+    all(): Promise<Record<string, NodeSavedSession>>;
+  };
 };
 
 type NativeOpenCommand = "open" | "xdg-open";
@@ -71,6 +85,7 @@ function createFileStore<T>(path: string): {
   set(key: string, value: T): Promise<void>;
   del(key: string): Promise<void>;
   clear(): Promise<void>;
+  all(): Promise<Record<string, T>>;
 } {
   return {
     async get(key) {
@@ -89,6 +104,9 @@ function createFileStore<T>(path: string): {
     },
     async clear() {
       await writeJsonStore(path, {});
+    },
+    async all() {
+      return readJsonStore<T>(path);
     },
   };
 }
@@ -129,6 +147,36 @@ function buildLoopbackClientId(redirectUri: string, scope: string): string {
   return `${LOOPBACK_ORIGIN}?${params.toString()}`;
 }
 
+function normalizeOAuthConfig(config: StoredOAuthConfig): {
+  activeDid: string;
+  handle: string;
+  clientId: string;
+  redirectUri: string;
+  scope: string;
+} {
+  if (!config) {
+    throw new GrainError("not_logged_in", "No OAuth session found.", "Run `grain login` to authenticate.");
+  }
+
+  return {
+    activeDid: config.activeDid,
+    handle: config.handle,
+    clientId: config.clientId,
+    redirectUri: config.redirectUri || "http://127.0.0.1/callback",
+    scope: config.scope || DEFAULT_SCOPE,
+  };
+}
+
+async function findOAuthStateKeyByAppState(stateStore: OAuthStores["stateStore"], appState: string): Promise<string | undefined> {
+  const entries = await stateStore.all();
+  for (const [key, value] of Object.entries(entries)) {
+    if (value?.appState === appState) {
+      return key;
+    }
+  }
+  return undefined;
+}
+
 function escapeHtml(value: string): string {
   return value
     .replace(/&/g, "&amp;")
@@ -138,14 +186,14 @@ function escapeHtml(value: string): string {
     .replace(/'/g, "&#39;");
 }
 
-function buildOAuthCallbackHtml(handle: string, ok: boolean): string {
+function buildOAuthCallbackHtml(handle: string, ok: boolean, messageOverride?: string): string {
   const safeHandle = escapeHtml(handle);
   const heading = ok
     ? `🎉 You have authenticated as ${safeHandle}.`
     : `Authentication did not complete for ${safeHandle}.`;
-  const message = ok
-    ? "You can close this page now and return to the terminal."
-    : "You can close this page and return to the terminal for details.";
+  const message =
+    messageOverride ??
+    (ok ? "You can close this page now and return to the terminal." : "You can close this page and return to the terminal for details.");
 
   return `<!doctype html>
 <html lang="en">
@@ -191,9 +239,7 @@ function buildOAuthCallbackHtml(handle: string, ok: boolean): string {
 </html>`;
 }
 
-function createClient(clientId: string, redirectUri: string, scope: string): NodeOAuthClient {
-  const stores = makeStores();
-
+function createClient(clientId: string, redirectUri: string, scope: string, stores: OAuthStores): NodeOAuthClient {
   return new NodeOAuthClient({
     clientMetadata: {
       client_id: clientId,
@@ -205,13 +251,18 @@ function createClient(clientId: string, redirectUri: string, scope: string): Nod
       token_endpoint_auth_method: "none",
       dpop_bound_access_tokens: true,
     },
-    stateStore: stores.stateStore,
-    sessionStore: stores.sessionStore,
+    stateStore: stores.stateStore as NodeSavedStateStore,
+    sessionStore: stores.sessionStore as NodeSavedSessionStore,
     requestLock: requestLocalLock,
   });
 }
 
-async function waitForOAuthCallback(handle: string, redirectPort: number, timeoutMs = 180000): Promise<URLSearchParams> {
+async function waitForOAuthCallback(
+  handle: string,
+  expectedOAuthState: string,
+  redirectPort: number,
+  timeoutMs = 180000,
+): Promise<URLSearchParams> {
   let resolveResult!: (params: URLSearchParams) => void;
   let rejectResult!: (error: Error) => void;
 
@@ -232,6 +283,24 @@ async function waitForOAuthCallback(handle: string, redirectPort: number, timeou
         const url = new URL(request.url);
         if (url.pathname !== CALLBACK_PATH) {
           return new Response("Not found", { status: 404 });
+        }
+
+        const callbackState = url.searchParams.get("state");
+        if (!callbackState || callbackState !== expectedOAuthState) {
+          return new Response(
+            buildOAuthCallbackHtml(
+              handle,
+              false,
+              "This callback is from a different login attempt. You can close this tab and continue from the newest login prompt.",
+            ),
+            {
+              status: 409,
+              headers: {
+                "content-type": "text/html; charset=utf-8",
+                "cache-control": "no-store",
+              },
+            },
+          );
         }
 
         const hasError = url.searchParams.has("error");
@@ -287,33 +356,30 @@ async function describeRepoHandle(session: OAuthSession, did: string, fallbackHa
   }
 }
 
-function normalizeStoredOAuth(config: Awaited<ReturnType<typeof loadConfig>>): {
-  activeDid: string;
-  handle: string;
-  clientId: string;
-  redirectUri: string;
-  scope: string;
-} {
-  const oauth = config?.oauth;
-  if (!oauth) {
-    throw new GrainError("not_logged_in", "No OAuth session found.", "Run `grain login` to authenticate.");
+async function revokeStoredDid(config: StoredOAuthConfig): Promise<void> {
+  if (!config) {
+    return;
   }
 
-  return {
-    activeDid: oauth.activeDid,
-    handle: oauth.handle,
-    clientId: oauth.clientId,
-    redirectUri: oauth.redirectUri || "http://127.0.0.1/callback",
-    scope: oauth.scope || DEFAULT_SCOPE,
-  };
+  const normalized = normalizeOAuthConfig(config);
+  const stores = makeStores();
+  const client = createClient(normalized.clientId, normalized.redirectUri, normalized.scope, stores);
+  try {
+    await client.revoke(normalized.activeDid);
+  } catch {
+    // best-effort revoke
+  }
 }
 
 export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> {
+  const previousConfig = await loadConfig();
   const redirectPort = randomPort();
   const redirectUri = `http://127.0.0.1:${redirectPort}${CALLBACK_PATH}`;
   const scope = DEFAULT_SCOPE;
   const clientId = buildLoopbackClientId(redirectUri, scope);
-  const oauthClient = createClient(clientId, redirectUri, scope);
+  const stores = makeStores();
+  await stores.stateStore.clear();
+  const oauthClient = createClient(clientId, redirectUri, scope, stores);
 
   const appState = randomBytes(16).toString("hex");
   const authorizeUrl = await oauthClient.authorize(handle, {
@@ -321,7 +387,12 @@ export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> 
     state: appState,
   });
 
-  const callbackPromise = waitForOAuthCallback(handle, redirectPort);
+  const expectedOAuthState = await findOAuthStateKeyByAppState(stores.stateStore, appState);
+  if (!expectedOAuthState) {
+    throw new GrainError("oauth_state_missing", "OAuth login could not be initialized.", "Run `grain login` again.");
+  }
+
+  const callbackPromise = waitForOAuthCallback(handle, expectedOAuthState, redirectPort);
 
   console.log("Open the following URL to continue login:");
   console.log(authorizeUrl.toString());
@@ -346,6 +417,10 @@ export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> 
   const did = session.did;
   const resolvedHandle = await describeRepoHandle(session, did, handle);
 
+  if (previousConfig?.oauth && previousConfig.oauth.activeDid !== did) {
+    await revokeStoredDid(previousConfig.oauth);
+  }
+
   const config = await loadConfig();
   const nextConfig = {
     ...(config ?? {}),
@@ -369,9 +444,10 @@ export async function loginWithOAuth(handle: string): Promise<LoginOAuthResult> 
 
 export async function getAuthorizedAgent(forceRefresh = false): Promise<{ agent: Agent; did: string; handle: string }> {
   const config = await loadConfig();
-  const oauth = normalizeStoredOAuth(config);
+  const oauth = normalizeOAuthConfig(config?.oauth);
 
-  const client = createClient(oauth.clientId, oauth.redirectUri, oauth.scope);
+  const stores = makeStores();
+  const client = createClient(oauth.clientId, oauth.redirectUri, oauth.scope, stores);
   let session: OAuthSession;
   try {
     session = await client.restore(oauth.activeDid, forceRefresh ? true : "auto");
@@ -396,8 +472,9 @@ export async function logoutOAuth(): Promise<void> {
     return;
   }
 
-  const oauth = normalizeStoredOAuth(config);
-  const client = createClient(oauth.clientId, oauth.redirectUri, oauth.scope);
+  const oauth = normalizeOAuthConfig(config.oauth);
+  const stores = makeStores();
+  const client = createClient(oauth.clientId, oauth.redirectUri, oauth.scope, stores);
 
   try {
     await client.revoke(oauth.activeDid);
