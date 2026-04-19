@@ -23,7 +23,7 @@ Defaults:
 Commands:
   grain help
   grain login [--handle <handle>]
-  grain whoami
+  grain whoami [--debug]
   grain logout
   grain upload-gallery --title <title> [--description <text>] [--location-name <name>] [--location-value <h3>] [--country <code>] [--locality <name>] [--region <name>] [--street <value>] [--postal-code <code>] [--place-name <name>] [--cw <label1,label2>] [--alt <text> ...] [--image <path> ...] [--image-url <url> ...] [--exif include|exclude] [--alt-ai-endpoint <url> --alt-ai-api-key <key> --alt-ai-model <model>] <image-path-or-url ...>
 
@@ -104,16 +104,23 @@ async function cmdLogin(argv: string[]): Promise<void> {
   console.log(`Grain library: ${result.libraryUrl}`);
 }
 
-async function cmdWhoAmI(): Promise<void> {
+async function cmdWhoAmI(argv: string[]): Promise<void> {
+  const parsed = parseArgs(argv);
+  const debug = hasOption(parsed.options, "debug");
   const { did, handle } = await getAuthorizedAgent(false);
-  const didFromHandle = await resolveHandleToDid(handle);
-  const pdsFromDid = await resolveDidToPds(did);
 
   console.log(`Handle: ${handle}`);
+  console.log(`Grain library: ${buildGrainLibraryUrl(did)}`);
+
+  if (!debug) {
+    return;
+  }
+
+  const didFromHandle = await resolveHandleToDid(handle);
+  const pdsFromDid = await resolveDidToPds(did);
   console.log(`DID: ${did}`);
   console.log(`Resolved DID from handle: ${didFromHandle}`);
   console.log(`Resolved PDS from DID: ${pdsFromDid}`);
-  console.log(`Grain library: ${buildGrainLibraryUrl(did)}`);
 }
 
 async function cmdLogout(): Promise<void> {
@@ -306,7 +313,7 @@ async function run(): Promise<void> {
       break;
     }
     case "whoami": {
-      await cmdWhoAmI();
+      await cmdWhoAmI(rest);
       break;
     }
     case "logout": {
