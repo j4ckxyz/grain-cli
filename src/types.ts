@@ -7,8 +7,24 @@ export type OAuthConfig = {
   loginAt: string;
 };
 
+export type PostingStyle = {
+  name: string;
+  description?: string;
+  locationName?: string;
+  locationValue?: string;
+  placeName?: string;
+  street?: string;
+  locality?: string;
+  region?: string;
+  postalCode?: string;
+  country?: string;
+  cw?: string;
+  exifMode?: "include" | "exclude";
+};
+
 export type AppConfig = {
   oauth?: OAuthConfig;
+  styles?: PostingStyle[];
 };
 
 export type RichTextFacet = {

@@ -3,11 +3,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { GrainError } from "./errors";
 import { parseWizardMediaEntry } from "./media-input";
-import type { AltAiConfig, MediaInput } from "./types";
+import type { AltAiConfig, MediaInput, PostingStyle } from "./types";
 
 type Prompt = {
   askText(message: string, options?: { allowEmpty?: boolean; defaultValue?: string }): Promise<string>;
   askYesNo(message: string, defaultYes?: boolean): Promise<boolean>;
+  askChoice(message: string, choices: string[], defaultIndex?: number): Promise<number>;
 };
 
 const FOCUS_FRAMES = ["[focus: .  ]", "[focus: .. ]", "[focus: ...]", "[focus: ok ]"];
@@ -80,7 +81,22 @@ function buildPrompt(): Prompt {
     }
   }
 
-  return { askText, askYesNo };
+  async function askChoice(message: string, choices: string[], defaultIndex = 0): Promise<number> {
+    while (true) {
+      stdout.write(`${message}\n`);
+      for (let i = 0; i < choices.length; i += 1) {
+        stdout.write(`  ${i + 1}) ${choices[i]}\n`);
+      }
+      const raw = await askText("Choose a number", { allowEmpty: true, defaultValue: String(defaultIndex + 1) });
+      const index = Number.parseInt(raw, 10) - 1;
+      if (Number.isFinite(index) && index >= 0 && index < choices.length) {
+        return index;
+      }
+      stdout.write("Please choose one of the listed numbers.\n");
+    }
+  }
+
+  return { askText, askYesNo, askChoice };
 }
 
 export async function openInNativeViewer(bytes: Uint8Array, mimeType: string): Promise<void> {
@@ -133,20 +149,47 @@ export type UploadWizardResult = {
   mediaInputs: MediaInput[];
   altTexts: string[];
   altAi?: AltAiConfig;
+  scheduleAt?: string;
 };
 
-export async function runUploadWizard(): Promise<UploadWizardResult> {
+type StartFlowResult =
+  | {
+      action: "post";
+      upload: UploadWizardResult;
+      saveAsStyleName?: string;
+      queueIfOffline: boolean;
+    }
+  | {
+      action: "save_draft";
+      upload: UploadWizardResult;
+    };
+
+export async function runUploadWizard(initial: Partial<UploadWizardResult> = {}): Promise<UploadWizardResult> {
   const prompt = buildPrompt();
 
   console.log("grain - interactive gallery upload");
   await animateLine("Setting up your gallery", FOCUS_FRAMES);
   console.log("Tip: local paths must start with @, for example @photo.jpg or @./images/a.png");
 
-  const title = await prompt.askText("Gallery title");
-  const descriptionRaw = await prompt.askText("Description (supports @mentions #hashtags links)", { allowEmpty: true });
+  const title = await prompt.askText("Gallery title", { defaultValue: initial.title });
+  const descriptionRaw = await prompt.askText("Description (supports @mentions #hashtags links)", {
+    allowEmpty: true,
+    defaultValue: initial.description,
+  });
   const description = descriptionRaw || undefined;
 
-  const addLocation = await prompt.askYesNo("Add location?");
+  const hasInitialLocation = Boolean(
+    initial.locationName ||
+      initial.locationValue ||
+      initial.placeName ||
+      initial.street ||
+      initial.locality ||
+      initial.region ||
+      initial.postalCode ||
+      initial.country,
+  );
+
+  const addLocation = await prompt.askYesNo("Add location?", hasInitialLocation);
   let locationName: string | undefined;
   let locationValue: string | undefined;
   let placeName: string | undefined;
@@ -157,26 +200,38 @@ export async function runUploadWizard(): Promise<UploadWizardResult> {
   let country: string | undefined;
 
   if (addLocation) {
-    locationName = await prompt.askText("Location name (display)");
-    locationValue = await prompt.askText("Location value (H3 index)");
-    placeName = (await prompt.askText("Address place name", { allowEmpty: true })) || undefined;
-    street = (await prompt.askText("Address street", { allowEmpty: true })) || undefined;
-    locality = (await prompt.askText("Address locality", { allowEmpty: true })) || undefined;
-    region = (await prompt.askText("Address region", { allowEmpty: true })) || undefined;
-    postalCode = (await prompt.askText("Address postal code", { allowEmpty: true })) || undefined;
-    country = (await prompt.askText("Address country code", { allowEmpty: true })) || undefined;
+    locationName = await prompt.askText("Location name (display)", { defaultValue: initial.locationName });
+    locationValue = await prompt.askText("Location value (H3 index)", { defaultValue: initial.locationValue });
+    placeName =
+      (await prompt.askText("Address place name", { allowEmpty: true, defaultValue: initial.placeName })) || undefined;
+    street = (await prompt.askText("Address street", { allowEmpty: true, defaultValue: initial.street })) || undefined;
+    locality = (await prompt.askText("Address locality", { allowEmpty: true, defaultValue: initial.locality })) || undefined;
+    region = (await prompt.askText("Address region", { allowEmpty: true, defaultValue: initial.region })) || undefined;
+    postalCode =
+      (await prompt.askText("Address postal code", { allowEmpty: true, defaultValue: initial.postalCode })) || undefined;
+    country = (await prompt.askText("Address country code", { allowEmpty: true, defaultValue: initial.country })) || undefined;
   }
 
-  const cw = (await prompt.askText("Content warnings (comma-separated labels, optional)", { allowEmpty: true })) || undefined;
-  const includeExif = await prompt.askYesNo("Include EXIF metadata? (default yes)", true);
+  const cw =
+    (await prompt.askText("Content warnings (comma-separated labels, optional)", {
+      allowEmpty: true,
+      defaultValue: initial.cw,
+    })) || undefined;
+  const includeExif = await prompt.askYesNo("Include EXIF metadata? (default yes)", (initial.exifMode ?? "include") === "include");
   const exifMode: "include" | "exclude" = includeExif ? "include" : "exclude";
 
-  const useAltAi = await prompt.askYesNo("Use AI alt text generation?", false);
+  const useAltAi = await prompt.askYesNo("Use AI alt text generation?", Boolean(initial.altAi));
   let altAi: AltAiConfig | undefined;
   if (useAltAi) {
-    const endpoint = await prompt.askText("Alt AI endpoint", { defaultValue: process.env.GRAIN_ALT_AI_ENDPOINT });
-    const apiKey = await prompt.askText("Alt AI API key", { defaultValue: process.env.GRAIN_ALT_AI_API_KEY });
-    const model = await prompt.askText("Alt AI model", { defaultValue: process.env.GRAIN_ALT_AI_MODEL });
+    const endpoint = await prompt.askText("Alt AI endpoint", {
+      defaultValue: initial.altAi?.endpoint ?? process.env.GRAIN_ALT_AI_ENDPOINT,
+    });
+    const apiKey = await prompt.askText("Alt AI API key", {
+      defaultValue: initial.altAi?.apiKey ?? process.env.GRAIN_ALT_AI_API_KEY,
+    });
+    const model = await prompt.askText("Alt AI model", {
+      defaultValue: initial.altAi?.model ?? process.env.GRAIN_ALT_AI_MODEL,
+    });
     altAi = {
       endpoint: endpoint.replace(/\/$/, ""),
       apiKey,
@@ -185,6 +240,13 @@ export async function runUploadWizard(): Promise<UploadWizardResult> {
   }
 
   const mediaInputs: MediaInput[] = [];
+  if ((initial.mediaInputs?.length ?? 0) > 0) {
+    const keepCurrent = await prompt.askYesNo(`Keep current ${initial.mediaInputs!.length} image(s)?`, true);
+    if (keepCurrent) {
+      mediaInputs.push(...initial.mediaInputs!);
+    }
+  }
+
   while (true) {
     const value = await prompt.askText("Add image (@path or https://url). Empty to continue", { allowEmpty: true });
     if (!value) {
@@ -216,9 +278,116 @@ export async function runUploadWizard(): Promise<UploadWizardResult> {
     cw,
     exifMode,
     mediaInputs,
-    altTexts: [],
+    altTexts: initial.altTexts ?? [],
     altAi,
+    scheduleAt: initial.scheduleAt,
   };
+}
+
+function parseScheduleInput(value: string): string | undefined {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+
+  const date = new Date(trimmed);
+  if (Number.isNaN(date.getTime())) {
+    throw new GrainError("invalid_schedule", "Could not parse schedule time.", "Use an ISO date/time like 2026-05-01T09:30:00.");
+  }
+  return date.toISOString();
+}
+
+function styleToWizardBase(style: PostingStyle): Partial<UploadWizardResult> {
+  return {
+    description: style.description,
+    locationName: style.locationName,
+    locationValue: style.locationValue,
+    placeName: style.placeName,
+    street: style.street,
+    locality: style.locality,
+    region: style.region,
+    postalCode: style.postalCode,
+    country: style.country,
+    cw: style.cw,
+    exifMode: style.exifMode ?? "include",
+  };
+}
+
+export async function runStartFlow(input: {
+  styles: PostingStyle[];
+  draftCount: number;
+}): Promise<StartFlowResult> {
+  const prompt = buildPrompt();
+  console.log("grain start - guided posting");
+  await animateLine("Loading camera bag", FOCUS_FRAMES, 65);
+
+  const modeChoices = ["Create and publish now (recommended)", "Save an unfinished draft"];
+  if (input.draftCount > 0) {
+    modeChoices.push(`Resume saved draft (use grain drafts, ${input.draftCount} available)`);
+  }
+
+  const mode = await prompt.askChoice("What do you want to do?", modeChoices, 0);
+  if (mode === 1) {
+    const upload = await runUploadWizard();
+    return { action: "save_draft", upload };
+  }
+
+  if (mode === 2) {
+    throw new GrainError("resume_draft_from_start", "Use `grain drafts` to pick and resume a saved draft.");
+  }
+
+  let chosenStyle: PostingStyle | undefined;
+  if (input.styles.length > 0) {
+    const useStyle = await prompt.askYesNo("Use a saved posting style?", true);
+    if (useStyle) {
+      const index = await prompt.askChoice(
+        "Pick a style",
+        input.styles.map((style) => style.name),
+        0,
+      );
+      chosenStyle = input.styles[index];
+    }
+  }
+
+  const upload = await runUploadWizard(chosenStyle ? styleToWizardBase(chosenStyle) : {});
+
+  const scheduleInput = await prompt.askText("Schedule time (optional, ISO format)", {
+    allowEmpty: true,
+    defaultValue: upload.scheduleAt,
+  });
+  upload.scheduleAt = parseScheduleInput(scheduleInput);
+
+  const queueIfOffline = await prompt.askYesNo("Queue and retry automatically if publish fails?", true);
+  const saveAsStyle = await prompt.askYesNo("Save this setup as a reusable style?", false);
+  const saveAsStyleName = saveAsStyle ? await prompt.askText("Style name") : undefined;
+
+  return {
+    action: "post",
+    upload,
+    saveAsStyleName,
+    queueIfOffline,
+  };
+}
+
+export async function reviewUploadPlan(upload: UploadWizardResult): Promise<"publish" | "edit" | "save_draft"> {
+  const prompt = buildPrompt();
+  console.log("\nReview before publish");
+  console.log(`- Title: ${upload.title}`);
+  console.log(`- Description: ${upload.description ?? "(none)"}`);
+  console.log(`- Images: ${upload.mediaInputs.length}`);
+  console.log(`- EXIF: ${upload.exifMode}`);
+  if (upload.scheduleAt) {
+    console.log(`- Schedule: ${upload.scheduleAt}`);
+  }
+
+  const choice = await prompt.askChoice("Choose next step", ["Publish", "Edit details", "Save draft for later"], 0);
+  if (choice === 1) {
+    return "edit";
+  }
+  if (choice === 2) {
+    return "save_draft";
+  }
+  return "publish";
 }
 
 export async function promptForAltTextFallback(context: {

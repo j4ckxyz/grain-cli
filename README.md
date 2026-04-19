@@ -1,6 +1,6 @@
 # grain
 
-`grain` is a Bun CLI for uploading galleries to Grain.social.
+`grain` is a simple command-line uploader for Grain.social.
 
 ## Quick start
 
@@ -15,10 +15,14 @@ grain
 
 ```bash
 grain help
+grain start
 grain login --handle j4ck.xyz
 grain whoami
 grain update
 grain logout
+grain drafts list
+grain queue run
+grain styles list
 ```
 
 Small interactive animations are enabled in TTY by default. Disable them with:
@@ -27,7 +31,39 @@ Small interactive animations are enabled in TTY by default. Disable them with:
 GRAIN_NO_ANIM=1 grain
 ```
 
-Run `grain` with no subcommand to open the interactive upload wizard.
+Run `grain` with no subcommand (or `grain start`) for the guided posting flow.
+
+## Guided flow
+
+- `grain start` opens a beginner-friendly posting flow.
+- Includes a **Review before publish** step where you can publish, edit, or save draft.
+- You can save unfinished galleries and resume later with `grain drafts resume --id <draft-id>`.
+- Optional scheduling: choose a future publish time and it is added to queue.
+- Optional retry queue: if network upload fails, it can auto-save to queue and retry later.
+
+Queue commands:
+
+```bash
+grain queue list
+grain queue run
+grain queue clear
+```
+
+Draft commands:
+
+```bash
+grain drafts list
+grain drafts resume --id d_...
+grain drafts delete --id d_...
+```
+
+Reusable posting styles:
+
+```bash
+grain styles list
+grain styles save --name "Street" --cw "violence" --exif include
+grain styles delete --name "Street"
+```
 
 ## Upload basics
 
@@ -35,6 +71,8 @@ Run `grain` with no subcommand to open the interactive upload wizard.
 grain upload-gallery \
   --title "Morning walk" \
   --description "Hi @alice.com #nature https://example.com" \
+  --schedule-at "2026-05-01T09:30:00" \
+  --queue-on-fail \
   --alt "Trees by the coast" \
   --alt "Clouds over the beach" \
   --image @img1.jpg \

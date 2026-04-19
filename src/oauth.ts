@@ -466,6 +466,24 @@ export async function getAuthorizedAgent(forceRefresh = false): Promise<{ agent:
   };
 }
 
+export async function getSessionInfo(): Promise<{ expiresAt?: string } | undefined> {
+  const config = await loadConfig();
+  if (!config?.oauth) {
+    return undefined;
+  }
+
+  const oauth = normalizeOAuthConfig(config.oauth);
+  const stores = makeStores();
+  const session = await stores.sessionStore.get(oauth.activeDid);
+  if (!session) {
+    return undefined;
+  }
+
+  return {
+    expiresAt: session.tokenSet.expires_at,
+  };
+}
+
 export async function logoutOAuth(): Promise<void> {
   const config = await loadConfig();
   if (!config?.oauth) {
